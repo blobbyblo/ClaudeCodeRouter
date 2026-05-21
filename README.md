@@ -8,6 +8,10 @@ A local proxy that sits between your LLM clients and your providers. Point Claud
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-3.40+-003B57.svg" alt="SQLite"></a>
 
+<br/>
+<br/>
+
+<img src="img/Screenshot-dashboard.png" alt="CCR Admin Dashboard" width="850"/>
 </div>
 
 ---

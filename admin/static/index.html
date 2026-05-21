@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCR Admin</title>
+<style>
+:root {
+  --bg:        #0E0C0B;
+  --surface:   #161310;
+  --surface-2: #1E1A16;
+  --border:    #2C2520;
+  --text:      #EDE8E3;
+  --text-2:    #7A6E66;
+  --accent:    #D97757;
+  --accent-h:  #C4603D;
+  --accent-dim: rgba(217,119,87,.12);
+  --danger:    #E05C5C;
+  --warn:      #CFA046;
+  --ok:        #5BA87A;
+  --radius:    4px;
+  --shadow:    0 2px 8px rgba(0,0,0,.5);
+  --font:      'SF Mono','Cascadia Code','Consolas','Menlo',monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.6; }
+a { color: var(--accent); text-decoration: none; }
+
+/* Layout */
+#app { display: flex; flex-direction: column; min-height: 100vh; }
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 48px;
+}
+header h1 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+header h1::before {
+  content: '>';
+  color: var(--accent);
+  font-weight: 400;
+}
+header h1 span { color: var(--accent); }
+
+/* Nav — underline-style active tab */
+nav { display: flex; gap: 0; }
+nav button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 14px;
+  height: 48px;
+  cursor: pointer;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  transition: color .15s, border-color .15s;
+  margin-bottom: -1px;
+}
+nav button:hover { color: var(--text); }
+nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+main { flex: 1; padding: 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
+.tab { display: none; }
+.tab.active { display: block; }
+
+/* Cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 2px; height: 100%;
+  background: var(--accent);
+  opacity: .5;
+}
+.card-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin-bottom: 8px; }
+.card-value { font-size: 24px; font-weight: 700; line-height: 1; color: var(--text); }
+.card-sub { font-size: 11px; color: var(--text-2); margin-top: 5px; }
+
+/* Section headers */
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-header h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); }
+
+/* Panels */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; margin-bottom: 20px; }
+.panel-title { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); display: flex; align-items: center; justify-content: space-between; }
+
+/* Table */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 8px 14px; text-align: left; white-space: nowrap; }
+th { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); background: var(--bg); border-bottom: 1px solid var(--border); }
+td { border-bottom: 1px solid var(--border); font-size: 12px; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface-2); }
+.tr-ok td   { background: rgba(91,168,122,.06); }
+.tr-warn td { background: rgba(207,160,70,.08); }
+.tr-err td  { background: rgba(224,92,92,.08); }
+.tr-ok:hover td   { background: rgba(91,168,122,.11); }
+.tr-warn:hover td { background: rgba(207,160,70,.13); }
+.tr-err:hover td  { background: rgba(224,92,92,.13); }
+
+/* Badges */
+.badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 600; letter-spacing: .03em; }
+.badge-ok   { background: rgba(91,168,122,.18);  color: var(--ok); }
+.badge-err  { background: rgba(224,92,92,.18);   color: var(--danger); }
+.badge-warn { background: rgba(207,160,70,.18);  color: var(--warn); }
+.badge-grey { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 500; transition: background .12s, border-color .12s, color .12s; }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-h); border-color: var(--accent-h); }
+.btn-ghost { background: transparent; color: var(--text-2); border-color: var(--border); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); border-color: var(--text-2); }
+.btn-danger { background: transparent; color: var(--danger); border-color: rgba(224,92,92,.4); }
+.btn-danger:hover { background: rgba(224,92,92,.1); border-color: var(--danger); }
+.btn-sm { padding: 2px 8px; font-size: 11px; }
+.btn:disabled { opacity: .4; cursor: default; }
+
+/* Filter bar */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.filter-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; }
+.filter-bar input { padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; min-width: 140px; }
+.filter-bar input:focus { outline: none; border-color: var(--accent); }
+
+/* Pagination */
+.pagination { display: flex; align-items: center; gap: 8px; padding: 10px 16px; justify-content: flex-end; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+
+/* Canvas chart */
+#chart-canvas { width: 100%; height: 180px; display: block; }
+
+/* Live log controls */
+.live-controls { padding: 9px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(91,168,122,.5); animation: pulse 2s infinite; flex-shrink: 0; }
+.live-dot.paused { background: var(--text-2); animation: none; box-shadow: none; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(91,168,122,.5)} 70%{box-shadow:0 0 0 7px rgba(91,168,122,0)} 100%{box-shadow:0 0 0 0 rgba(91,168,122,0)} }
+#live-count { font-size: 11px; color: var(--text-2); margin-left: auto; }
+
+/* Modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.modal-backdrop.hidden { display: none; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; min-width: 360px; max-width: 520px; width: 100%; box-shadow: 0 16px 48px rgba(0,0,0,.6); }
+.modal h3 { font-size: 13px; font-weight: 700; margin-bottom: 18px; color: var(--text); letter-spacing: .02em; }
+.modal h3::before { content: '# '; color: var(--accent); font-weight: 400; }
+.modal .form-group { margin-bottom: 14px; }
+.modal .form-group label { display: block; font-size: 10px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px; }
+.modal input, .modal select, .modal textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; }
+.modal input:focus, .modal select:focus, .modal textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.modal input:disabled { opacity: .5; cursor: not-allowed; }
+.modal textarea { resize: vertical; min-height: 72px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+.key-reveal { background: var(--bg); border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px; font-size: 12px; word-break: break-all; margin-bottom: 8px; user-select: all; color: var(--accent); }
+.key-note { font-size: 11px; color: var(--warn); margin-bottom: 14px; font-weight: 500; }
+
+/* Config sub-tabs */
+.subtabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.subtabs button { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px; cursor: pointer; font-family: var(--font); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2); transition: color .15s, border-color .15s; }
+.subtabs button:hover { color: var(--text); }
+.subtabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Empty state */
+.empty { text-align: center; padding: 48px 24px; color: var(--text-2); font-size: 12px; }
+
+/* Mono / truncate */
+.mono { font-family: var(--font); }
+.trunc { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Field hint */
+.field-hint { font-size: 10px; color: var(--text-2); margin-top: 5px; line-height: 1.5; }
+
+/* Uptime in header */
+.uptime-badge { margin-left: auto; font-size: 11px; color: var(--text-2); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>CCR <span>Admin</span></h1>
+    <nav>
+      <button class="active" data-tab="dashboard">Dashboard</button>
+      <button data-tab="usage">Usage</button>
+      <button data-tab="livelog">Live Log</button>
+      <button data-tab="config">Config</button>
+      <button data-tab="keys">Keys</button>
+    </nav>
+    <span class="uptime-badge" id="uptime-badge"></span>
+  </header>
+  <main>
+
+    <!-- ===== DASHBOARD ===== -->
+    <div id="tab-dashboard" class="tab active">
+      <div class="cards">
+        <div class="card">
+          <div class="card-label">Requests Today</div>
+          <div class="card-value" id="dash-req">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Tokens Today</div>
+          <div class="card-value" id="dash-tok">—</div>
+          <div class="card-sub" id="dash-tok-sub"></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Active Keys</div>
+          <div class="card-value" id="dash-keys">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Top Model</div>
+          <div class="card-value" id="dash-model" style="font-size:15px;word-break:break-word">—</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Hourly Requests — Last 24 h</div>
+        <canvas id="chart-canvas"></canvas>
+      </div>
+      <div class="panel">
+        <div class="panel-title">
+          Quick Setup — Claude Code
+          <button class="btn btn-ghost btn-sm" onclick="copySetupBlock()">Copy</button>
+        </div>
+        <pre id="setup-block" style="padding:14px 18px;font-size:12px;line-height:1.8;color:var(--text);overflow-x:auto;margin:0;tab-size:2"></pre>
+      </div>
+    </div>
+
+    <!-- ===== USAGE ===== -->
+    <div id="tab-usage" class="tab">
+      <div class="panel">
+        <div class="filter-bar">
+          <label>Key / ID<input id="f-key" type="text" placeholder="sk-ccr-…"></label>
+          <label>Model<input id="f-model" type="text" placeholder="e.g. claude-3-5-sonnet"></label>
+          <label>From<input id="f-from" type="datetime-local"></label>
+          <label>To<input id="f-to" type="datetime-local"></label>
+          <button class="btn btn-primary" onclick="applyUsageFilter()">Apply</button>
+          <button class="btn btn-ghost" onclick="clearUsageFilter()">Clear</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Key</th>
+                <th>Req Model</th>
+                <th>Routed Model</th>
+                <th>Provider</th>
+                <th>In Tok</th>
+                <th>Out Tok</th>
+                <th>Latency</th>
+                <th>Status</th>
+                <th>Fallbacks</th>
+              </tr>
+            </thead>
+            <tbody id="usage-tbody"></tbody>
+          </table>
+          <div class="empty hidden" id="usage-empty">No records found for the current filter.</div>
+        </div>
+        <div class="pagination">
+          <span id="usage-info"></span>
+          <button class="btn btn-ghost btn-sm" id="usage-prev" onclick="usageChangePage(-1)">&#8592; Prev</button>
+          <button class="btn btn-ghost btn-sm" id="usage-next" onclick="usageChangePage(1)">Next &#8594;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== LIVE LOG ===== -->
+    <div id="tab-livelog" class="tab">
+      <div class="panel">
+        <div class="live-controls">
+          <div class="live-dot" id="live-dot"></div>
+          <span id="live-status">Not connected</span>
+          <button class="btn btn-ghost btn-sm" id="pause-btn" onclick="togglePause()">Pause</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearLive()">Clear</button>
+          <span id="live-count"></span>
+        </div>
+        <div class="tbl-wrap" id="live-scroll-area" style="max-height:520px;overflow-y:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Key</th>
+                <th>Model</th>
+                <th>Provider</th>
+                <th>In</th>
+                <th>Out</th>
+                <th>Latency</th>
+                <th>Status</th>
+                <th>Fallbacks</th>
+              </tr>
+            </thead>
+            <tbody id="live-tbody"></tbody>
+          </table>
+          <div class="empty" id="live-empty">Waiting for events…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CONFIG ===== -->
+    <div id="tab-config" class="tab">
+      <div class="subtabs">
+        <button class="active" onclick="switchSubtab('models', this, true)">Models</button>
+        <button onclick="switchSubtab('providers', this, true)">Providers</button>
+      </div>
+
+      <!-- Models sub-tab -->
+      <div id="subtab-models">
+        <div class="section-header">
+          <h2>Model Aliases</h2>
+          <button class="btn btn-primary" onclick="openModelForm(null)">+ Add Model</button>
+        </div>
+        <div class="panel">
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Alias</th>
+                  <th>Providers : Model ID</th>
+                  <th>Fallback To</th>
+                  <th style="width:120px"></th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+            <div class="empty hidden" id="models-empty">No models configured.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Providers sub-tab -->
+      <div id="subtab-providers" style="display:none">
+        <div class="section-header">
+          <h2>Providers</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="runProviderTests()">Test Keys</button>
+            <button class="btn btn-primary" onclick="openProviderForm(null)">+ Add Provider</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Base URL</th>
+                  <th>Convention</th>
+                  <th>Keys</th>
+                  <th style="width:200px"></th>
+                </tr>
+              </thead>
+              <tbody id="providers-tbody"></tbody>
+            </table>
+            <div class="empty hidden" id="providers-empty">No providers configured.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== KEYS ===== -->
+    <div id="tab-keys" class="tab">
+      <div class="section-header">
+        <h2>API Keys</h2>
+        <button class="btn btn-primary" onclick="openMintModal()">Mint New Key</button>
+      </div>
+      <div class="panel">
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Key ID</th>
+                <th>Created</th>
+                <th>Last Used</th>
+                <th>Status</th>
+                <th style="width:90px"></th>
+              </tr>
+            </thead>
+            <tbody id="keys-tbody"></tbody>
+          </table>
+          <div class="empty hidden" id="keys-empty">No keys found.</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ===== MINT KEY MODAL ===== -->
+<div class="modal-backdrop hidden" id="mint-modal">
+  <div class="modal">
+    <h3>Mint New Key</h3>
+    <div id="mint-form-wrap">
+      <div class="form-group">
+        <label>Key Name</label>
+        <input type="text" id="mint-name" placeholder="e.g. local-dev" autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeMintModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="mintKey()">Create Key</button>
+      </div>
+    </div>
+    <div id="mint-reveal-wrap" style="display:none">
+      <p style="margin-bottom:10px;font-size:13px;">Key created successfully. Copy it now.</p>
+      <div class="key-reveal" id="mint-key-value"></div>
+      <p class="key-note">This key will not be shown again. Store it securely.</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="copyNewKey()">Copy Key</button>
+        <button class="btn btn-primary" onclick="closeMintModal()">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODEL FORM MODAL ===== -->
+<div class="modal-backdrop hidden" id="model-modal">
+  <div class="modal">
+    <h3 id="model-modal-title">Add Model</h3>
+    <div class="form-group">
+      <label>Alias</label>
+      <input type="text" id="mm-alias" placeholder="claude-3-5-sonnet">
+    </div>
+    <div class="form-group">
+      <label>Providers (one per line: provider_id:model_id)</label>
+      <textarea id="mm-providers" rows="4" placeholder="anthropic:claude-3-5-sonnet-20241022&#10;openrouter:anthropic/claude-3-5-sonnet"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Fallback To (alias, optional)</label>
+      <input type="text" id="mm-fallback" placeholder="claude-3-haiku">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('model-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveModel()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PROVIDER FORM MODAL ===== -->
+<div class="modal-backdrop hidden" id="provider-modal">
+  <div class="modal">
+    <h3 id="prov-modal-title">Add Provider</h3>
+    <div class="form-group">
+      <label>Provider ID</label>
+      <input type="text" id="pm-id" placeholder="anthropic">
+    </div>
+    <div class="form-group">
+      <label>Base URL</label>
+      <input type="text" id="pm-url" placeholder="https://api.anthropic.com/v1">
+    </div>
+    <div class="form-group">
+      <label>Convention</label>
+      <select id="pm-convention">
+        <option value="openai">openai</option>
+        <option value="anthropic">anthropic</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="pm-delete-btn" style="display:none;margin-right:auto" onclick="deleteEditingProvider()">Delete Provider</button>
+      <button class="btn btn-ghost" onclick="closeModal('provider-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProvider()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TEST RESULTS MODAL ===== -->
+<div class="modal-backdrop hidden" id="test-modal">
+  <div class="modal" style="min-width:640px;max-width:860px;width:100%">
+    <h3>Provider Key Tests</h3>
+    <div id="test-results" style="margin-bottom:16px;min-height:60px;overflow-x:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="test-rerun-btn" onclick="runProviderTests()" style="margin-right:auto">Re-run</button>
+      <button class="btn btn-primary" onclick="closeModal('test-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PROVIDER KEYS MODAL ===== -->
+<div class="modal-backdrop hidden" id="provkeys-modal">
+  <div class="modal" style="min-width:480px;max-width:600px">
+    <h3 id="provkeys-title">Keys</h3>
+    <div id="provkeys-list" style="margin-bottom:16px;min-height:32px"></div>
+    <div class="form-group">
+      <label>Add Key(s) — one per line</label>
+      <textarea id="provkeys-new" rows="3" placeholder="sk-ant-api03-…"></textarea>
+      <p class="field-hint">Multiple keys are round-robined. A key that receives a 429 is skipped for 60 s before being retried.</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('provkeys-modal')">Close</button>
+      <button class="btn btn-primary" onclick="addProviderKeys()">Add Key(s)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Utilities
+// ============================================================
+function $id(id) { return document.getElementById(id); }
+
+function fmtTime(ts) {
+  if (ts == null || ts === '') return '—';
+  const d = (typeof ts === 'number') ? new Date(ts * 1000) : new Date(ts);
+  return isNaN(d) ? String(ts) : d.toLocaleString();
+}
+
+function fmtTimeShort(ts) {
+  if (ts == null || ts === '') return '—';
+  const d = (typeof ts === 'number') ? new Date(ts * 1000) : new Date(ts);
+  return isNaN(d) ? String(ts) : d.toLocaleTimeString();
+}
+
+function fmtNum(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString();
+}
+
+function truncKey(id) {
+  if (!id) return '—';
+  if (id.length <= 19) return id;
+  return id.slice(0, 16) + '…';
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function escAttr(s) { return String(s).replace(/'/g, "\\'"); }
+
+async function apiFetch(path, opts) {
+  const res = await fetch(path, opts);
+  if (res.status === 204) return null;
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json')) return res.json();
+  return res.text();
+}
+
+function showToast(msg, type) {
+  const el = document.createElement('div');
+  el.textContent = msg;
+  const bg = (type === 'err') ? 'var(--danger)' : 'var(--ok)';
+  Object.assign(el.style, {
+    position: 'fixed', bottom: '24px', right: '24px', zIndex: '9999',
+    padding: '10px 18px', borderRadius: '6px', fontSize: '13px', fontWeight: '500',
+    background: bg, color: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,.2)',
+    transition: 'opacity .3s',
+  });
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 350); }, 2500);
+}
+
+// ============================================================
+// Tab navigation
+// ============================================================
+const tabInited = {};
+
+function activateTab(name, pushHash) {
+  const btn = document.querySelector('nav button[data-tab="' + name + '"]');
+  if (!btn) return;
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  $id('tab-' + name).classList.add('active');
+  if (!tabInited[name]) {
+    tabInited[name] = true;
+    initTab(name);
+  }
+  if (pushHash) {
+    const sub = (name === 'config') ? ('/' + currentSubtab) : '';
+    history.pushState(null, '', '#' + name + sub);
+  }
+}
+
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab, true));
+});
+
+function initTab(name) {
+  if (name === 'dashboard') initDashboard();
+  else if (name === 'usage') initUsage();
+  else if (name === 'livelog') initLiveLog();
+  else if (name === 'config') { loadModels(); loadProviders(); }
+  else if (name === 'keys') loadKeys();
+}
+
+// ============================================================
+// Dashboard
+// ============================================================
+async function initDashboard() {
+  await Promise.all([refreshDashboard(), buildSetupBlock()]);
+  setInterval(refreshDashboard, 30000);
+}
+
+async function refreshDashboard() {
+  try {
+    const [summary, health] = await Promise.all([
+      apiFetch('/admin/api/usage/summary').catch(() => []),
+      apiFetch('/admin/api/health').catch(() => null),
+    ]);
+
+    if (health && health.uptime_s != null) {
+      const h = Math.floor(health.uptime_s / 3600);
+      const m = Math.floor((health.uptime_s % 3600) / 60);
+      $id('uptime-badge').textContent = 'uptime ' + h + 'h ' + m + 'm  |  total: ' + fmtNum(health.requests_total) + ' req';
+    }
+
+    const rows = Array.isArray(summary) ? summary : [];
+    const dayStart = Math.floor(new Date().setHours(0,0,0,0) / 1000);
+    const todayRows = rows.filter(r => (r.hour_ts || 0) >= dayStart);
+
+    let reqToday = 0, inTok = 0, outTok = 0;
+    const modelCounts = {};
+    todayRows.forEach(r => {
+      reqToday += (r.request_count || 0);
+      inTok    += (r.total_input_tokens  || 0);
+      outTok   += (r.total_output_tokens || 0);
+      const m = r.model || r.routed_model || '?';
+      modelCounts[m] = (modelCounts[m] || 0) + (r.request_count || 0);
+    });
+
+    $id('dash-req').textContent = fmtNum(reqToday);
+    $id('dash-tok').textContent = fmtNum(inTok + outTok);
+    $id('dash-tok-sub').textContent = 'in: ' + fmtNum(inTok) + ' / out: ' + fmtNum(outTok);
+
+    // Active keys count
+    apiFetch('/admin/api/keys').then(keys => {
+      if (Array.isArray(keys)) {
+        const active = keys.filter(k => !k.revoked).length;
+        $id('dash-keys').textContent = active;
+      }
+    }).catch(() => {});
+
+    // Top model
+    let topModel = '—', topCount = 0;
+    Object.entries(modelCounts).forEach(([m, c]) => { if (c > topCount) { topModel = m; topCount = c; } });
+    $id('dash-model').textContent = topModel;
+
+    drawHourlyChart(rows);
+  } catch (e) {
+    console.error('Dashboard refresh error:', e);
+  }
+}
+
+function drawHourlyChart(summary) {
+  const canvas = $id('chart-canvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth || 600;
+  const H = canvas.offsetHeight || 180;
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const cs = getComputedStyle(document.documentElement);
+  const colText   = cs.getPropertyValue('--text-2').trim()  || '#888';
+  const colBorder = cs.getPropertyValue('--border').trim()  || '#ddd';
+  const colAccent = cs.getPropertyValue('--accent').trim()  || '#4f6ef7';
+
+  // 24 hourly buckets ending now
+  const nowMs = Date.now();
+  const buckets = [];
+  for (let i = 23; i >= 0; i--) {
+    const ts = Math.floor((nowMs - i * 3600000) / 3600000) * 3600;
+    buckets.push({ ts, count: 0, hour: new Date(ts * 1000).getHours() });
+  }
+  summary.forEach(r => {
+    const idx = buckets.findIndex(b => b.ts === r.hour_ts);
+    if (idx >= 0) buckets[idx].count += (r.request_count || 0);
+  });
+
+  const PAD = { top: 16, right: 16, bottom: 38, left: 48 };
+  const cw = W - PAD.left - PAD.right;
+  const ch = H - PAD.top  - PAD.bottom;
+  const maxVal = Math.max(1, ...buckets.map(b => b.count));
+  const barW = cw / buckets.length;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid + Y-axis labels
+  const gridN = 4;
+  ctx.strokeStyle = colBorder;
+  ctx.lineWidth = 1;
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = colText;
+  for (let i = 0; i <= gridN; i++) {
+    const y = PAD.top + ch - (i / gridN) * ch;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + cw, y); ctx.stroke();
+    ctx.fillText(Math.round(maxVal * i / gridN), PAD.left - 6, y + 4);
+  }
+
+  // Bars
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + ch);
+  grad.addColorStop(0, colAccent + 'bb');
+  grad.addColorStop(1, colAccent + '22');
+  ctx.fillStyle = grad;
+
+  buckets.forEach((b, i) => {
+    const x  = PAD.left + i * barW + 2;
+    const bh = Math.max(0, (b.count / maxVal) * ch);
+    const y  = PAD.top + ch - bh;
+    if (ctx.roundRect) {
+      ctx.beginPath(); ctx.roundRect(x, y, barW - 4, bh, [3, 3, 0, 0]); ctx.fill();
+    } else {
+      ctx.fillRect(x, y, barW - 4, bh);
+    }
+  });
+
+  // X-axis labels every 6th bucket
+  ctx.textAlign = 'center';
+  ctx.fillStyle = colText;
+  buckets.forEach((b, i) => {
+    if (i % 6 === 0) {
+      const x = PAD.left + i * barW + barW / 2;
+      ctx.fillText(String(b.hour).padStart(2, '0') + ':00', x, H - PAD.bottom + 16);
+    }
+  });
+}
+
+async function buildSetupBlock() {
+  let apiKey = 'your-ccr-key-here';
+  let clientPort = 4080;
+  try {
+    const [keys, info] = await Promise.all([
+      apiFetch('/admin/api/keys').catch(() => []),
+      apiFetch('/admin/api/info').catch(() => null),
+    ]);
+    const active = Array.isArray(keys) ? keys.find(k => !k.revoked) : null;
+    if (active) apiKey = active.id;
+    if (info && info.client_port) clientPort = info.client_port;
+  } catch (_) {}
+
+  const block = {
+    env: {
+      ANTHROPIC_API_KEY: apiKey,
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:' + clientPort,
+      ANTHROPIC_MODEL: 'default',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'opus',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku',
+    }
+  };
+  $id('setup-block').textContent = JSON.stringify(block, null, 2);
+}
+
+function copySetupBlock() {
+  const text = $id('setup-block').textContent;
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('Copied to clipboard'))
+    .catch(() => { prompt('Copy this config:', text); });
+}
+
+window.addEventListener('resize', () => {
+  if ($id('tab-dashboard').classList.contains('active')) refreshDashboard();
+});
+
+// ============================================================
+// Usage tab
+// ============================================================
+let usageAll = [], usageCurPage = 0;
+const PAGE = 25;
+
+async function initUsage() {
+  await loadUsage();
+}
+
+async function loadUsage() {
+  const key   = $id('f-key').value.trim();
+  const model = $id('f-model').value.trim();
+  const fromV = $id('f-from').value;
+  const toV   = $id('f-to').value;
+  const params = new URLSearchParams({ limit: '500' });
+  if (key)   params.set('key',   key);
+  if (model) params.set('model', model);
+  if (fromV) params.set('from',  String(Math.floor(new Date(fromV).getTime() / 1000)));
+  if (toV)   params.set('to',    String(Math.floor(new Date(toV).getTime()   / 1000)));
+
+  try {
+    const rows = await apiFetch('/admin/api/usage?' + params);
+    usageAll = Array.isArray(rows) ? rows : [];
+    usageCurPage = 0;
+    renderUsage();
+  } catch (e) {
+    showToast('Failed to load usage data', 'err');
+  }
+}
+
+function renderUsage() {
+  const start = usageCurPage * PAGE;
+  const slice = usageAll.slice(start, start + PAGE);
+  const tbody = $id('usage-tbody');
+
+  $id('usage-empty').style.display = usageAll.length === 0 ? '' : 'none';
+  $id('usage-info').textContent = usageAll.length > 0
+    ? (start + 1) + '–' + Math.min(start + PAGE, usageAll.length) + ' of ' + usageAll.length
+    : '';
+  $id('usage-prev').disabled = usageCurPage === 0;
+  $id('usage-next').disabled = start + PAGE >= usageAll.length;
+
+  tbody.innerHTML = slice.map(r => {
+    const st = r.status_code || r.status || 0;
+    const cls = st >= 400 ? 'badge-err' : (st ? 'badge-ok' : 'badge-grey');
+    return '<tr>' +
+      '<td>' + fmtTime(r.created_at || r.ts) + '</td>' +
+      '<td class="mono trunc" title="' + escHtml(r.key_id || '') + '">' + escHtml(truncKey(r.key_id)) + '</td>' +
+      '<td class="trunc">' + escHtml(r.model || '—') + '</td>' +
+      '<td class="trunc">' + escHtml(r.routed_model || '—') + '</td>' +
+      '<td>' + escHtml(r.provider || '—') + '</td>' +
+      '<td>' + fmtNum(r.input_tokens) + '</td>' +
+      '<td>' + fmtNum(r.output_tokens) + '</td>' +
+      '<td>' + (r.latency_ms != null ? r.latency_ms + ' ms' : '—') + '</td>' +
+      '<td><span class="badge ' + cls + '">' + (st || '—') + '</span></td>' +
+      '<td>' + (r.fallback_count ?? 0) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function applyUsageFilter() { loadUsage(); }
+function clearUsageFilter() {
+  ['f-key','f-model','f-from','f-to'].forEach(id => { $id(id).value = ''; });
+  loadUsage();
+}
+function usageChangePage(dir) {
+  const max = Math.ceil(usageAll.length / PAGE) - 1;
+  usageCurPage = Math.max(0, Math.min(max, usageCurPage + dir));
+  renderUsage();
+}
+
+// ============================================================
+// Live Log tab
+// ============================================================
+let liveES = null, livePaused = false, liveCount = 0;
+
+function initLiveLog() {
+  connectLive();
+}
+
+function connectLive() {
+  if (liveES) { liveES.close(); liveES = null; }
+  $id('live-dot').classList.remove('paused');
+  $id('live-status').textContent = 'Connecting…';
+  liveES = new EventSource('/admin/api/usage/live');
+  liveES.onopen = () => { $id('live-status').textContent = 'Live'; };
+  liveES.onmessage = (e) => {
+    try { appendLiveRow(JSON.parse(e.data)); } catch (_) {}
+  };
+  liveES.onerror = () => {
+    $id('live-status').textContent = 'Reconnecting…';
+    $id('live-dot').classList.add('paused');
+  };
+}
+
+function appendLiveRow(r) {
+  liveCount++;
+  $id('live-empty').style.display = 'none';
+  $id('live-count').textContent = fmtNum(liveCount) + ' events';
+
+  const st = r.status_code || r.status || 0;
+  const fb = r.fallback_count || 0;
+  let rowClass = '';
+  if      (st >= 400)            rowClass = 'tr-err';
+  else if (st === 200 && fb > 0) rowClass = 'tr-warn';
+  else if (st === 200)           rowClass = 'tr-ok';
+
+  const badge = st >= 400 ? 'badge-err' : (st ? 'badge-ok' : 'badge-grey');
+  const tr = document.createElement('tr');
+  tr.className = rowClass;
+  tr.innerHTML =
+    '<td>' + fmtTimeShort(r.created_at || r.ts) + '</td>' +
+    '<td class="mono" title="' + escHtml(r.key_id||'') + '">' + escHtml(truncKey(r.key_id)) + '</td>' +
+    '<td class="trunc">' + escHtml(r.model || '—') + '</td>' +
+    '<td>' + escHtml(r.provider || '—') + '</td>' +
+    '<td>' + fmtNum(r.input_tokens) + '</td>' +
+    '<td>' + fmtNum(r.output_tokens) + '</td>' +
+    '<td>' + (r.latency_ms != null ? r.latency_ms + ' ms' : '—') + '</td>' +
+    '<td><span class="badge ' + badge + '">' + (st||'—') + '</span></td>' +
+    '<td>' + fb + '</td>';
+
+  const tbody = $id('live-tbody');
+  tbody.prepend(tr);
+  while (tbody.children.length > 300) tbody.lastElementChild.remove();
+
+  if (!livePaused) {
+    const area = $id('live-scroll-area');
+    area.scrollTop = 0;
+  }
+}
+
+function togglePause() {
+  livePaused = !livePaused;
+  $id('pause-btn').textContent = livePaused ? 'Resume' : 'Pause';
+  $id('live-dot').classList.toggle('paused', livePaused);
+}
+
+function clearLive() {
+  $id('live-tbody').innerHTML = '';
+  liveCount = 0;
+  $id('live-count').textContent = '';
+  $id('live-empty').style.display = '';
+}
+
+// ============================================================
+// Config — sub-tabs
+// ============================================================
+let currentSubtab = 'models';
+
+function switchSubtab(name, btn, pushHash) {
+  currentSubtab = name;
+  document.querySelectorAll('.subtabs button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  else {
+    document.querySelectorAll('.subtabs button').forEach(b => {
+      if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'" + name + "'")) b.classList.add('active');
+    });
+  }
+  $id('subtab-models').style.display    = (name === 'models')    ? '' : 'none';
+  $id('subtab-providers').style.display = (name === 'providers') ? '' : 'none';
+  if (pushHash) history.pushState(null, '', '#config/' + name);
+}
+
+// ---- Models ----
+let modelsCache = [];
+
+async function loadModels() {
+  try {
+    const data = await apiFetch('/admin/api/models');
+    // data may be an object (map alias->config) or an array
+    if (Array.isArray(data)) {
+      modelsCache = data;
+    } else if (data && typeof data === 'object') {
+      modelsCache = Object.entries(data).map(([alias, v]) => Object.assign({ alias }, v));
+    } else {
+      modelsCache = [];
+    }
+    renderModels();
+  } catch (e) { showToast('Failed to load models', 'err'); }
+}
+
+function renderModels() {
+  $id('models-empty').style.display = modelsCache.length === 0 ? '' : 'none';
+  $id('models-tbody').innerHTML = modelsCache.map(m => {
+    const provBadges = (m.providers || []).map(p => {
+      let label;
+      if (typeof p === 'string') label = p;
+      else label = (p.provider || p.provider_id || p.id || '') + ':' + (p.model_id || p.model || '');
+      return '<span class="badge badge-grey">' + escHtml(label) + '</span>';
+    }).join(' ');
+    return '<tr>' +
+      '<td><strong>' + escHtml(m.alias) + '</strong></td>' +
+      '<td>' + (provBadges || '—') + '</td>' +
+      '<td>' + escHtml(m.fallback_to || '—') + '</td>' +
+      '<td style="padding:7px 14px"><div style="display:flex;gap:6px">' +
+        '<button class="btn btn-ghost btn-sm" onclick="openModelForm(\'' + escAttr(m.alias) + '\')">Edit</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteModel(\'' + escAttr(m.alias) + '\')">Delete</button>' +
+      '</div></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openModelForm(alias) {
+  $id('model-modal-title').textContent = alias ? 'Edit Model' : 'Add Model';
+  if (alias) {
+    const m = modelsCache.find(x => x.alias === alias);
+    if (m) {
+      $id('mm-alias').value    = m.alias;
+      $id('mm-alias').disabled = true;
+      $id('mm-fallback').value = m.fallback_to || '';
+      const lines = (m.providers || []).map(p =>
+        (typeof p === 'string') ? p : (p.provider || p.provider_id || p.id || '') + ':' + (p.model_id || p.model || '')
+      );
+      $id('mm-providers').value = lines.join('\n');
+    }
+  } else {
+    $id('mm-alias').value    = '';
+    $id('mm-alias').disabled = false;
+    $id('mm-providers').value = '';
+    $id('mm-fallback').value  = '';
+  }
+  $id('model-modal').classList.remove('hidden');
+  setTimeout(() => { if (!alias) $id('mm-alias').focus(); }, 50);
+}
+
+async function saveModel() {
+  const alias = $id('mm-alias').value.trim();
+  if (!alias) { showToast('Alias is required', 'err'); return; }
+
+  const lines = $id('mm-providers').value.trim().split('\n').filter(Boolean);
+  const providers = lines.map(l => {
+    const colon = l.indexOf(':');
+    return colon < 0
+      ? { provider: l, model_id: '' }
+      : { provider: l.slice(0, colon), model_id: l.slice(colon + 1) };
+  });
+
+  const fallback_to = $id('mm-fallback').value.trim() || null;
+  try {
+    await apiFetch('/admin/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alias, providers, fallback_to }),
+    });
+    showToast('Model saved');
+    closeModal('model-modal');
+    loadModels();
+  } catch (e) { showToast('Failed to save model', 'err'); }
+}
+
+async function deleteModel(alias) {
+  if (!confirm('Delete model alias "' + alias + '"?\nThis cannot be undone.')) return;
+  try {
+    await apiFetch('/admin/api/models/' + encodeURIComponent(alias), { method: 'DELETE' });
+    showToast('Model deleted');
+    loadModels();
+  } catch (e) { showToast('Failed to delete model', 'err'); }
+}
+
+// ---- Providers ----
+let providersCache = [];
+
+async function loadProviders() {
+  try {
+    const data = await apiFetch('/admin/api/providers');
+    providersCache = Array.isArray(data) ? data : [];
+    renderProviders();
+  } catch (e) { showToast('Failed to load providers', 'err'); }
+}
+
+function renderProviders() {
+  $id('providers-empty').style.display = providersCache.length === 0 ? '' : 'none';
+  const sorted = providersCache.slice().sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+  $id('providers-tbody').innerHTML = sorted.map(p => {
+    const cnt = p.key_count || 0;
+    const keyBadge = cnt > 0
+      ? '<span class="badge badge-ok">' + cnt + ' key' + (cnt !== 1 ? 's' : '') + '</span>'
+      : '<span class="badge badge-grey">no keys</span>';
+    return '<tr>' +
+      '<td><strong>' + escHtml(p.id) + '</strong></td>' +
+      '<td class="mono trunc" title="' + escHtml(p.base_url||'') + '">' + escHtml(p.base_url || '—') + '</td>' +
+      '<td>' + escHtml(p.convention || '—') + '</td>' +
+      '<td>' + keyBadge + '</td>' +
+      '<td style="padding:7px 14px"><div style="display:flex;gap:6px">' +
+        '<button class="btn btn-ghost btn-sm" onclick="openProviderForm(\'' + escAttr(p.id) + '\')">Edit</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="openProviderKeys(\'' + escAttr(p.id) + '\')">Keys</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="duplicateProvider(\'' + escAttr(p.id) + '\')">Duplicate</button>' +
+      '</div></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openProviderForm(id) {
+  $id('prov-modal-title').textContent = id ? 'Edit Provider' : 'Add Provider';
+  $id('pm-delete-btn').style.display = id ? '' : 'none';
+  if (id) {
+    const p = providersCache.find(x => x.id === id);
+    if (p) {
+      $id('pm-id').value         = p.id;
+      $id('pm-id').disabled      = true;
+      $id('pm-url').value        = p.base_url || '';
+      $id('pm-convention').value = p.convention || 'openai';
+    }
+  } else {
+    $id('pm-id').value         = '';
+    $id('pm-id').disabled      = false;
+    $id('pm-url').value        = '';
+    $id('pm-convention').value = 'openai';
+  }
+  $id('provider-modal').classList.remove('hidden');
+  setTimeout(() => { if (!id) $id('pm-id').focus(); }, 50);
+}
+
+// Returns the next unused provider ID by incrementing the trailing -N suffix.
+// e.g. nvidia_nim → nvidia_nim-2 → nvidia_nim-3
+function nextProviderId(baseId) {
+  const existing = new Set(providersCache.map(p => p.id));
+  const m = baseId.match(/^(.*?)(?:-(\d+))?$/);
+  const stem = m[1];
+  let n = m[2] ? parseInt(m[2], 10) + 1 : 2;
+  while (existing.has(stem + '-' + n)) n++;
+  return stem + '-' + n;
+}
+
+function duplicateProvider(id) {
+  const p = providersCache.find(x => x.id === id);
+  if (!p) return;
+  $id('prov-modal-title').textContent = 'Duplicate Provider';
+  $id('pm-delete-btn').style.display = 'none';
+  $id('pm-id').value         = nextProviderId(p.id);
+  $id('pm-id').disabled      = false;
+  $id('pm-url').value        = p.base_url || '';
+  $id('pm-convention').value = p.convention || 'openai';
+  $id('provider-modal').classList.remove('hidden');
+  setTimeout(() => { $id('pm-id').focus(); $id('pm-id').select(); }, 50);
+}
+
+async function saveProvider() {
+  const id = $id('pm-id').value.trim();
+  if (!id) { showToast('Provider ID is required', 'err'); return; }
+  const body = {
+    id,
+    base_url:   $id('pm-url').value.trim(),
+    convention: $id('pm-convention').value,
+  };
+  try {
+    await apiFetch('/admin/api/providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    showToast('Provider saved');
+    closeModal('provider-modal');
+    loadProviders();
+  } catch (e) { showToast('Failed to save provider', 'err'); }
+}
+
+async function deleteEditingProvider() {
+  const id = $id('pm-id').value.trim();
+  if (!confirm('Delete provider "' + id + '"?\n\nThis cannot be undone.')) return;
+  try {
+    await apiFetch('/admin/api/providers/' + encodeURIComponent(id), { method: 'DELETE' });
+    showToast('Provider deleted');
+    closeModal('provider-modal');
+    loadProviders();
+  } catch (e) { showToast('Failed to delete provider', 'err'); }
+}
+
+// ---- Provider key management ----
+let provkeysTarget = null;
+
+function maskKey(k) {
+  if (!k || k.length <= 12) return '••••••••';
+  return k.slice(0, 8) + '…' + k.slice(-4);
+}
+
+async function openProviderKeys(id) {
+  provkeysTarget = id;
+  $id('provkeys-title').textContent = 'Keys — ' + id;
+  $id('provkeys-new').value = '';
+  await refreshProviderKeysList();
+  $id('provkeys-modal').classList.remove('hidden');
+}
+
+async function refreshProviderKeysList() {
+  try {
+    const keys = await apiFetch('/admin/api/providers/' + encodeURIComponent(provkeysTarget) + '/keys');
+    const list = $id('provkeys-list');
+    if (!Array.isArray(keys) || keys.length === 0) {
+      list.innerHTML = '<div style="color:var(--text-2);font-size:12px;padding:6px 0">No keys added yet.</div>';
+      return;
+    }
+    list.innerHTML = '<table style="width:100%;border-collapse:collapse">' +
+      keys.map(k =>
+        '<tr>' +
+        '<td style="padding:5px 0 5px 0;font-family:var(--font);font-size:12px;color:var(--text);letter-spacing:.04em">' + escHtml(maskKey(k.key_value)) + '</td>' +
+        '<td style="padding:5px 8px;color:var(--text-2);font-size:11px;white-space:nowrap">' + fmtTime(k.created_at) + '</td>' +
+        '<td style="padding:5px 0;text-align:right"><button class="btn btn-danger btn-sm" onclick="deleteProviderKey(' + k.id + ')">Delete</button></td>' +
+        '</tr>'
+      ).join('') +
+      '</table>';
+  } catch (e) { showToast('Failed to load keys', 'err'); }
+}
+
+async function addProviderKeys() {
+  const lines = $id('provkeys-new').value.trim().split('\n').map(s => s.trim()).filter(Boolean);
+  if (!lines.length) { showToast('Enter at least one key', 'err'); return; }
+  try {
+    for (const kv of lines) {
+      await apiFetch('/admin/api/providers/' + encodeURIComponent(provkeysTarget) + '/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key_value: kv }),
+      });
+    }
+    $id('provkeys-new').value = '';
+    showToast(lines.length + ' key' + (lines.length !== 1 ? 's' : '') + ' added');
+    await refreshProviderKeysList();
+    loadProviders();
+  } catch (e) { showToast('Failed to add key', 'err'); }
+}
+
+async function deleteProviderKey(keyId) {
+  if (!confirm('Delete this key? This cannot be undone.')) return;
+  try {
+    await apiFetch('/admin/api/providers/' + encodeURIComponent(provkeysTarget) + '/keys/' + keyId, { method: 'DELETE' });
+    showToast('Key deleted');
+    await refreshProviderKeysList();
+    loadProviders();
+  } catch (e) { showToast('Failed to delete key', 'err'); }
+}
+
+// ============================================================
+// Keys tab
+// ============================================================
+let keysCache = [];
+let newKeyId = '';
+
+async function loadKeys() {
+  try {
+    const data = await apiFetch('/admin/api/keys');
+    keysCache = Array.isArray(data) ? data : [];
+    renderKeys();
+  } catch (e) { showToast('Failed to load keys', 'err'); }
+}
+
+function renderKeys() {
+  $id('keys-empty').style.display = keysCache.length === 0 ? '' : 'none';
+  $id('keys-tbody').innerHTML = keysCache.map(k => {
+    const badge = k.revoked
+      ? '<span class="badge badge-err">Revoked</span>'
+      : '<span class="badge badge-ok">Active</span>';
+    const revokeBtn = !k.revoked
+      ? '<button class="btn btn-danger btn-sm" onclick="revokeKey(\'' + escAttr(k.id) + '\',\'' + escAttr(k.name||'') + '\')">Revoke</button>'
+      : '';
+    return '<tr>' +
+      '<td>' + escHtml(k.name || '—') + '</td>' +
+      '<td class="mono" title="' + escHtml(k.id||'') + '">' + escHtml(truncKey(k.id)) + '</td>' +
+      '<td>' + fmtTime(k.created_at) + '</td>' +
+      '<td>' + (k.last_used_at != null ? fmtTime(k.last_used_at) : '—') + '</td>' +
+      '<td>' + badge + '</td>' +
+      '<td>' + revokeBtn + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openMintModal() {
+  $id('mint-name').value = '';
+  $id('mint-form-wrap').style.display  = '';
+  $id('mint-reveal-wrap').style.display = 'none';
+  $id('mint-modal').classList.remove('hidden');
+  setTimeout(() => $id('mint-name').focus(), 50);
+}
+
+function closeMintModal() {
+  $id('mint-modal').classList.add('hidden');
+  newKeyId = '';
+  if (tabInited['keys']) loadKeys();
+}
+
+async function mintKey() {
+  const name = $id('mint-name').value.trim();
+  if (!name) { showToast('Key name is required', 'err'); return; }
+  try {
+    const res = await apiFetch('/admin/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    newKeyId = res.id || '';
+    $id('mint-key-value').textContent = newKeyId;
+    $id('mint-form-wrap').style.display  = 'none';
+    $id('mint-reveal-wrap').style.display = '';
+  } catch (e) { showToast('Failed to mint key', 'err'); }
+}
+
+function copyNewKey() {
+  if (!newKeyId) return;
+  navigator.clipboard.writeText(newKeyId)
+    .then(() => showToast('Copied to clipboard'))
+    .catch(() => { prompt('Copy this key:', newKeyId); });
+}
+
+async function revokeKey(id, name) {
+  const label = name ? '"' + name + '"' : truncKey(id);
+  if (!confirm('Revoke key ' + label + '?\n\nThis cannot be undone — any clients using this key will stop working.')) return;
+  try {
+    await apiFetch('/admin/api/keys/' + encodeURIComponent(id), { method: 'DELETE' });
+    showToast('Key revoked');
+    loadKeys();
+  } catch (e) { showToast('Failed to revoke key', 'err'); }
+}
+
+// ============================================================
+// Provider key tests
+// ============================================================
+async function runProviderTests() {
+  $id('test-modal').classList.remove('hidden');
+  $id('test-rerun-btn').disabled = true;
+  $id('test-results').innerHTML =
+    '<div style="color:var(--text-2);font-size:12px;padding:12px 0">Running tests — this may take up to 60 s…</div>';
+
+  try {
+    const results = await apiFetch('/admin/api/test', { method: 'POST' });
+    renderTestResults(results);
+  } catch (e) {
+    $id('test-results').innerHTML =
+      '<div style="color:var(--danger);font-size:12px;padding:12px 0">Request failed: ' + escHtml(String(e)) + '</div>';
+  } finally {
+    $id('test-rerun-btn').disabled = false;
+  }
+}
+
+function renderTestResults(results) {
+  if (!results || results.length === 0) {
+    $id('test-results').innerHTML =
+      '<div style="color:var(--text-2);font-size:12px;padding:12px 0">No models with providers configured.</div>';
+    return;
+  }
+  const rows = results.map(r => {
+    const badge = r.ok
+      ? '<span class="badge badge-ok">OK</span>'
+      : '<span class="badge badge-err" title="' + escHtml(r.error || '') + '">FAIL</span>';
+    const errCell = r.ok ? '' : '<div style="font-size:10px;color:var(--danger);margin-top:3px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(r.error||'') + '">' + escHtml(r.error||'') + '</div>';
+    return '<tr>' +
+      '<td><strong>' + escHtml(r.model) + '</strong></td>' +
+      '<td>' + escHtml(r.provider) + '</td>' +
+      '<td class="mono" style="font-size:11px">' + escHtml(r.model_id) + '</td>' +
+      '<td class="mono" style="font-size:11px">' + escHtml(r.key_masked) + '</td>' +
+      '<td>' + (r.ok ? r.latency_ms + ' ms' : '—') + '</td>' +
+      '<td>' + badge + errCell + '</td>' +
+      '</tr>';
+  }).join('');
+
+  $id('test-results').innerHTML =
+    '<table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr>' +
+    '<th>Alias</th><th>Provider</th><th>Model ID</th><th>Key</th><th>Latency</th><th>Result</th>' +
+    '</tr></thead>' +
+    '<tbody>' + rows + '</tbody>' +
+    '</table>';
+}
+
+// ============================================================
+// Modal helpers
+// ============================================================
+function closeModal(id) { $id(id).classList.add('hidden'); }
+
+document.querySelectorAll('.modal-backdrop').forEach(bd => {
+  bd.addEventListener('click', e => { if (e.target === bd) bd.classList.add('hidden'); });
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-backdrop:not(.hidden)').forEach(m => m.classList.add('hidden'));
+  }
+});
+
+$id('mint-name').addEventListener('keydown', e => { if (e.key === 'Enter') mintKey(); });
+
+// ============================================================
+// Config hot-reload SSE
+// ============================================================
+(function startConfigEventStream() {
+  const es = new EventSource('/admin/api/config/events');
+  es.addEventListener('reload', () => {
+    // Re-fetch whichever config data is currently visible.
+    if (tabInited['config']) { loadModels(); loadProviders(); }
+    // Dashboard model list may also be stale — refresh silently.
+    if (tabInited['dashboard']) { refreshDashboard(); }
+  });
+  es.onerror = () => {
+    // Browser will auto-reconnect; nothing extra needed.
+  };
+})();
+
+// ============================================================
+// Hash-based routing
+// ============================================================
+function applyHash() {
+  const hash = location.hash.replace(/^#/, '') || 'dashboard';
+  const [tab, sub] = hash.split('/');
+  const validTabs = ['dashboard', 'usage', 'livelog', 'config', 'keys'];
+  const resolvedTab = validTabs.includes(tab) ? tab : 'dashboard';
+  activateTab(resolvedTab, false);
+  if (resolvedTab === 'config' && sub) {
+    switchSubtab(sub === 'providers' ? 'providers' : 'models', null, false);
+  }
+}
+
+window.addEventListener('popstate', applyHash);
+
+// ============================================================
+// Bootstrap
+// ============================================================
+applyHash();
+</script>
+</body>
+</html>

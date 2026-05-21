@@ -1,0 +1,29 @@
+# OS files
+.DS_Store
+Thumbs.db
+.claude
+.codegraph
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Databases
+ccr.db
+ccr.db-shm
+ccr.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+*.exe
+dist/
+build/
+
+# Config
+config.toml

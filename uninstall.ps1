@@ -14,6 +14,10 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Test-Command ([string]$cmd) {
+    return [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
+}
+
 # ---------------------------------------------------------------
 # Configuration (must match setup.ps1)
 # ---------------------------------------------------------------
@@ -78,6 +82,28 @@ if ($userPath -match [regex]::Escape($BinDir)) {
     Write-Host "Removed from user PATH: $BinDir" -ForegroundColor Green
 } else {
     Write-Host "PATH entry not found: $BinDir" -ForegroundColor Yellow
+}
+
+# ---------------------------------------------------------------
+# 3b. Stop and remove Windows service if present
+# ---------------------------------------------------------------
+Write-Host "`n==> Checking for cc-router Windows service..." -ForegroundColor Cyan
+$ServiceName = "cc-router"
+$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingService) {
+    Write-Host "Service found. Stopping and removing..." -ForegroundColor Yellow
+    if (Test-Command "nssm") {
+        nssm stop $ServiceName 2>$null
+        nssm remove $ServiceName confirm
+        Write-Host "Service removed via NSSM." -ForegroundColor Green
+    } else {
+        # Fallback to sc.exe if NSSM isn't on PATH
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        sc.exe delete $ServiceName | Out-Null
+        Write-Host "Service removed via sc.exe." -ForegroundColor Green
+    }
+} else {
+    Write-Host "No service found, skipping." -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------

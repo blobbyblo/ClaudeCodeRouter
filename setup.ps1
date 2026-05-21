@@ -187,3 +187,100 @@ Write-Host "  Data dir:   $InstallDir"
 Write-Host ""
 Write-Host "Usage:" -ForegroundColor Cyan
 Write-Host "  cc-router -config `"$ConfigPath`"`n"
+
+# ---------------------------------------------------------------
+# 7. Optional: Install as Windows service via NSSM
+# ---------------------------------------------------------------
+Write-Host ""
+$installService = Read-Host "Install cc-router as a Windows service? (y/N)"
+if ($installService -notmatch '^[Yy]$') {
+    Write-Host "Skipping service installation." -ForegroundColor Yellow
+    exit 0
+}
+
+# Ensure winget is available
+Write-Host "`n==> Checking for winget..." -ForegroundColor Cyan
+if (-not (Test-Command "winget")) {
+    Write-Host "winget not found. Please install App Installer from the Microsoft Store and re-run." -ForegroundColor Red
+    exit 1
+}
+Write-Host "winget is available." -ForegroundColor Green
+
+# Ensure NSSM is installed
+Write-Host "`n==> Checking for NSSM..." -ForegroundColor Cyan
+if (-not (Test-Command "nssm")) {
+    Write-Host "Installing NSSM via winget..."
+    winget install nssm --silent --accept-package-agreements --accept-source-agreements
+    # Refresh PATH for this session
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    if (-not (Test-Command "nssm")) {
+        Write-Host "NSSM installed but not yet on PATH. Please restart your terminal and re-run setup." -ForegroundColor Yellow
+        exit 1
+    }
+}
+Write-Host "NSSM is available." -ForegroundColor Green
+
+# Stop and remove existing service if present
+$ServiceName = "cc-router"
+$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingService) {
+    Write-Host "Existing service found. Removing..." -ForegroundColor Yellow
+    nssm stop $ServiceName 2>$null
+    nssm remove $ServiceName confirm
+    Write-Host "Existing service removed." -ForegroundColor Green
+}
+
+# Create log directory
+$LogDir = Join-Path $InstallDir "logs"
+Ensure-Dir $LogDir
+Write-Host "Log directory: $LogDir" -ForegroundColor Green
+
+# Register the service
+Write-Host "`n==> Registering cc-router as a service..." -ForegroundColor Cyan
+nssm install $ServiceName $BinaryPath
+nssm set $ServiceName AppParameters "-config `"$ConfigPath`""
+nssm set $ServiceName AppDirectory $InstallDir
+nssm set $ServiceName DisplayName "Claude Code Router"
+nssm set $ServiceName Description "CCR proxy router for Claude Code"
+nssm set $ServiceName Start SERVICE_AUTO_START
+nssm set $ServiceName AppStdout (Join-Path $LogDir "stdout.log")
+nssm set $ServiceName AppStderr (Join-Path $LogDir "stderr.log")
+nssm set $ServiceName AppRotateFiles 1
+nssm set $ServiceName AppRotateBytes 10485760
+
+# Start the service
+Write-Host "`n==> Starting service..." -ForegroundColor Cyan
+nssm start $ServiceName
+
+# Verify it started
+Start-Sleep -Seconds 2
+$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($svc -and $svc.Status -eq "Running") {
+    Write-Host "Service is running." -ForegroundColor Green
+} else {
+    Write-Host "Service may have failed to start. Check logs:" -ForegroundColor Red
+    Write-Host "  $LogDir\stderr.log"
+    exit 1
+}
+
+# Read admin port from config for the URL
+$AdminPort = 4081
+$adminPortMatch = Select-String -Path $ConfigPath -Pattern "admin_port\s*=\s*(\d+)"
+if ($adminPortMatch) {
+    $AdminPort = $adminPortMatch.Matches[0].Groups[1].Value
+}
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  Service installed and running!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Service name:  $ServiceName"
+Write-Host "  Logs:          $LogDir"
+Write-Host ""
+
+$openAdmin = Read-Host "Open the admin panel in your browser? (y/N)"
+if ($openAdmin -match '^[Yy]$') {
+    Start-Process "http://127.0.0.1:$AdminPort"
+}

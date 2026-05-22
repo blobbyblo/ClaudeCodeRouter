@@ -145,6 +145,31 @@ func (rt *Router) proxy(w http.ResponseWriter, r *http.Request, req providers.An
 		var buf bytes.Buffer
 		result, err := rt.fallbackChain(r.Context(), cfg, req, &buf, 0)
 		if err != nil {
+			// Context exceeded: synthesise a plain JSON Message so Claude Code
+			// sees stop_reason "max_tokens" and triggers auto-compact.
+			var cee *providers.ContextExceededError
+			if errors.As(err, &cee) {
+				slog.Warn("router: context window exceeded, signalling auto-compact",
+					"model", requestedModel, "input_tokens", cee.InputTokens, "context_limit", cee.ContextLimit)
+				msgJSON, synthErr := synthesizeContextExceededMessage(cee.InputTokens, cee.ContextLimit)
+				if synthErr != nil {
+					jsonError(w, "failed to synthesize context-exceeded response", http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(msgJSON)
+				rt.publishEvent(middleware.LogEvent{
+					TS:             time.Now().Unix(),
+					ClientKey:      clientKey,
+					RequestedModel: requestedModel,
+					RoutedModel:    requestedModel,
+					Provider:       "none",
+					LatencyMS:      time.Since(start).Milliseconds(),
+					Status:         http.StatusOK,
+				})
+				return
+			}
 			slog.Error("router: all providers exhausted", "model", requestedModel, "err", err)
 			jsonError(w, "all providers exhausted, please try again later", http.StatusServiceUnavailable)
 			rt.publishEvent(middleware.LogEvent{
@@ -209,6 +234,24 @@ func (rt *Router) proxy(w http.ResponseWriter, r *http.Request, req providers.An
 
 	result, err := rt.fallbackChain(r.Context(), cfg, req, dest, 0)
 	if err != nil {
+		// Context exceeded (Anthropic SSE path only): synthesise an SSE response
+		// that carries stop_reason "max_tokens" so Claude Code triggers auto-compact.
+		var cee *providers.ContextExceededError
+		if errors.As(err, &cee) && !openAIOut {
+			slog.Warn("router: context window exceeded, signalling auto-compact",
+				"model", requestedModel, "input_tokens", cee.InputTokens, "context_limit", cee.ContextLimit)
+			synthesizeContextExceededSSE(lw, cee.InputTokens, cee.ContextLimit)
+			rt.publishEvent(middleware.LogEvent{
+				TS:             time.Now().Unix(),
+				ClientKey:      clientKey,
+				RequestedModel: requestedModel,
+				RoutedModel:    requestedModel,
+				Provider:       "none",
+				LatencyMS:      time.Since(start).Milliseconds(),
+				Status:         http.StatusOK,
+			})
+			return
+		}
 		slog.Error("router: all providers exhausted", "model", requestedModel, "err", err)
 		if !lw.started {
 			jsonError(w, "all providers exhausted, please try again later", http.StatusServiceUnavailable)

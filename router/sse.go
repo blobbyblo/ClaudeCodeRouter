@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -197,5 +199,109 @@ func sseBytesToMessage(sse []byte) ([]byte, error) {
 		},
 	}
 
+	return json.Marshal(response)
+}
+
+// synthesizeContextExceededSSE writes a synthetic Anthropic SSE stream that
+// signals Claude Code to auto-compact the conversation.  The stream carries the
+// real input_tokens count and stop_reason "max_tokens" so the client knows the
+// context window is full without needing to retry upstream.
+func synthesizeContextExceededSSE(w io.Writer, inputTokens, contextLimit int) {
+	msgID := fmt.Sprintf("msg_ctx_%d", inputTokens)
+	text := fmt.Sprintf(
+		"Context window exceeded (%d / %d tokens). Please compact the conversation.",
+		inputTokens, contextLimit,
+	)
+
+	// message_start — carry the real input token count.
+	msgStart, _ := json.Marshal(map[string]interface{}{
+		"type": "message_start",
+		"message": map[string]interface{}{
+			"id":            msgID,
+			"type":          "message",
+			"role":          "assistant",
+			"content":       []interface{}{},
+			"model":         "proxy",
+			"stop_reason":   nil,
+			"stop_sequence": nil,
+			"usage": map[string]int{
+				"input_tokens":  inputTokens,
+				"output_tokens": 0,
+			},
+		},
+	})
+	fmt.Fprintf(w, "event: message_start\ndata: %s\n\n", msgStart)
+
+	// ping
+	fmt.Fprintf(w, "event: ping\ndata: {\"type\":\"ping\"}\n\n")
+
+	// content_block_start
+	blockStart, _ := json.Marshal(map[string]interface{}{
+		"type":  "content_block_start",
+		"index": 0,
+		"content_block": map[string]interface{}{
+			"type": "text",
+			"text": "",
+		},
+	})
+	fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", blockStart)
+
+	// text delta
+	textDelta, _ := json.Marshal(map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]interface{}{
+			"type": "text_delta",
+			"text": text,
+		},
+	})
+	fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", textDelta)
+
+	// content_block_stop
+	blockStop, _ := json.Marshal(map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+	fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", blockStop)
+
+	// message_delta — stop_reason: max_tokens triggers Claude Code auto-compact.
+	msgDelta, _ := json.Marshal(map[string]interface{}{
+		"type": "message_delta",
+		"delta": map[string]interface{}{
+			"stop_reason":   "max_tokens",
+			"stop_sequence": nil,
+		},
+		"usage": map[string]int{
+			"output_tokens": 1,
+		},
+	})
+	fmt.Fprintf(w, "event: message_delta\ndata: %s\n\n", msgDelta)
+
+	// message_stop
+	fmt.Fprintf(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+}
+
+// synthesizeContextExceededMessage builds the equivalent non-streaming JSON
+// Message body for the same signal (used when the client sent stream:false).
+func synthesizeContextExceededMessage(inputTokens, contextLimit int) ([]byte, error) {
+	text := fmt.Sprintf(
+		"Context window exceeded (%d / %d tokens). Please compact the conversation.",
+		inputTokens, contextLimit,
+	)
+	response := map[string]interface{}{
+		"id":   fmt.Sprintf("msg_ctx_%d", inputTokens),
+		"type": "message",
+		"role": "assistant",
+		"content": []interface{}{
+			map[string]interface{}{"type": "text", "text": text},
+		},
+		"model":         "proxy",
+		"stop_reason":   "max_tokens",
+		"stop_sequence": nil,
+		"usage": map[string]int{
+			"input_tokens":  inputTokens,
+			"output_tokens": 1,
+		},
+	}
 	return json.Marshal(response)
 }

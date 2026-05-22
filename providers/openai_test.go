@@ -221,6 +221,65 @@ func TestOpenAIProvider_SystemMessage(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_ContextExceeded(t *testing.T) {
+	// NIM-style 400 body for context length exceeded.
+	const contextErrBody = `{"error":{"object":"error","message":"Requested token count exceeds the model's maximum context length of 262144 tokens. You requested a total of 265409 tokens: 233409 tokens from the input messages and 32000 tokens for the completion. Please reduce the number of tokens in the input messages or the completion to fit within the limit.","type":"BadRequestError","param":null,"code":400}}`
+
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, contextErrBody)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(srv.URL)
+	req := AnthropicRequest{
+		MaxTokens: 32000,
+		Messages:  []Message{{Role: "user", Content: []ContentBlock{{Type: "text", Text: "hi"}}}},
+	}
+
+	var buf bytes.Buffer
+	_, _, err := p.Stream(context.Background(), req, "kimi-k2", "key", &buf)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrContextExceeded) {
+		t.Fatalf("expected ErrContextExceeded, got %v", err)
+	}
+	var cee *ContextExceededError
+	if !errors.As(err, &cee) {
+		t.Fatalf("expected *ContextExceededError, got %T", err)
+	}
+	if cee.ContextLimit != 262144 {
+		t.Errorf("ContextLimit = %d, want 262144", cee.ContextLimit)
+	}
+	if cee.InputTokens != 233409 {
+		t.Errorf("InputTokens = %d, want 233409", cee.InputTokens)
+	}
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 upstream call (no retry), got %d", callCount)
+	}
+}
+
+func TestParseContextLengthError(t *testing.T) {
+	body := []byte(`{"error":{"message":"Requested token count exceeds the model's maximum context length of 262144 tokens. You requested a total of 265409 tokens: 233409 tokens from the input messages and 32000 tokens for the completion.","type":"BadRequestError"}}`)
+	limit, input := parseContextLengthError(body)
+	if limit != 262144 {
+		t.Errorf("limit = %d, want 262144", limit)
+	}
+	if input != 233409 {
+		t.Errorf("input = %d, want 233409", input)
+	}
+
+	// Non-matching body returns zeros.
+	l2, i2 := parseContextLengthError([]byte(`{"error":{"message":"something else"}}`))
+	if l2 != 0 || i2 != 0 {
+		t.Errorf("non-matching body should return (0,0), got (%d,%d)", l2, i2)
+	}
+}
+
 func TestOpenAIProvider_FinishReasonMapping(t *testing.T) {
 	cases := []struct {
 		openaiReason    string

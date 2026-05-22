@@ -19,6 +19,26 @@ var ErrUpstream = errors.New("upstream error (5xx)")
 // that the cooldown duration from the Retry-After header is also available.
 var ErrRateLimit = errors.New("rate limited (429)")
 
+// ErrContextExceeded is returned when the request body is too large for the
+// model's context window (HTTP 400 context-length error).  Unlike rate limits
+// or upstream errors, this is a property of the REQUEST, not the key or
+// provider — retrying other keys or models will produce the same result, so
+// the fallback chain stops immediately and the proxy synthesises a response
+// that signals Claude Code to compact the conversation.
+var ErrContextExceeded = errors.New("context window exceeded")
+
+// ContextExceededError wraps ErrContextExceeded and carries the token counts
+// parsed from the upstream error body so the proxy can include them in the
+// synthesised response.
+type ContextExceededError struct {
+	ContextLimit int
+	InputTokens  int
+}
+
+func (e *ContextExceededError) Error() string        { return ErrContextExceeded.Error() }
+func (e *ContextExceededError) Is(target error) bool { return target == ErrContextExceeded }
+func (e *ContextExceededError) Unwrap() error        { return ErrContextExceeded }
+
 // RateLimitError wraps ErrRateLimit and carries the duration from the
 // upstream Retry-After header (0 means "use the default cooldown").
 type RateLimitError struct {

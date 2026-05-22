@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -379,6 +381,8 @@ func partialTagOverlap(s, tag string) int {
 
 // Stream sends req to the OpenAI Chat Completions API, converts the response
 // to Anthropic SSE format, and writes it to w.
+// On a 400 context-length error it returns *ContextExceededError so the
+// router can synthesise a compact signal instead of retrying other keys.
 func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, modelID, apiKey string, w io.Writer) (int, int, error) {
 	oaiReq := convertToOpenAI(req, modelID)
 
@@ -386,8 +390,8 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 	if err != nil {
 		return 0, 0, fmt.Errorf("openai: marshal request: %w", err)
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		p.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return 0, 0, fmt.Errorf("openai: build request: %w", err)
 	}
@@ -413,6 +417,14 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
+		// Detect context-length 400 before returning a generic error.
+		if resp.StatusCode == http.StatusBadRequest {
+			if limit, inputToks := parseContextLengthError(b); limit > 0 && inputToks > 0 {
+				slog.Warn("openai: context window exceeded",
+					"model", modelID, "context_limit", limit, "input_tokens", inputToks)
+				return 0, 0, &ContextExceededError{ContextLimit: limit, InputTokens: inputToks}
+			}
+		}
 		return 0, 0, fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(b))
 	}
 
@@ -640,6 +652,35 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 	return inputTokens, outputTokens, nil
 }
 
+
+// contextExceededRe matches OpenAI-compatible "context length exceeded" 400 bodies.
+// Example: "...maximum context length of 262144 tokens. You requested ... : 233409 tokens from the input..."
+var contextExceededRe = regexp.MustCompile(
+	`maximum context length of (\d+)[^:]+:\s*(\d+) tokens from the input`,
+)
+
+// parseContextLengthError parses a 400 response body and returns (contextLimit,
+// inputTokens) if it is a context-length-exceeded error, or (0, 0) otherwise.
+func parseContextLengthError(body []byte) (contextLimit, inputTokens int) {
+	var errResp struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &errResp) != nil {
+		return 0, 0
+	}
+	m := contextExceededRe.FindStringSubmatch(errResp.Error.Message)
+	if m == nil {
+		return 0, 0
+	}
+	limit, err1 := strconv.Atoi(m[1])
+	input, err2 := strconv.Atoi(m[2])
+	if err1 != nil || err2 != nil || limit <= 0 || input <= 0 {
+		return 0, 0
+	}
+	return limit, input
+}
 
 // mapFinishReason converts an OpenAI finish_reason to an Anthropic stop_reason.
 func mapFinishReason(reason string) string {

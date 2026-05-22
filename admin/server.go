@@ -90,6 +90,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		r.Get("/health", s.handleHealth)
 		r.Get("/info", s.handleInfo)
 		r.Post("/test", s.handleTest)
+		r.Post("/restart", s.handleRestart)
 
 		r.Get("/keys", s.handleListKeys)
 		r.Post("/keys", s.handleMintKey)

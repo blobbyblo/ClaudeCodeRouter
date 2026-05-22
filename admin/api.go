@@ -423,6 +423,19 @@ func maskKeyDisplay(k string) string {
 	return k[:8] + "…" + k[len(k)-4:]
 }
 
+// ---- /admin/api/restart ------------------------------------------------------
+
+// handleRestart responds immediately then calls os.Exit(0) after a brief delay
+// so NSSM (or any other service wrapper) automatically restarts the process,
+// picking up a freshly-deployed binary without needing elevated privileges.
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{"status": "restarting"})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
+	}()
+}
+
 // ---- /admin/api/config/events ------------------------------------------------
 
 func (s *Server) handleConfigEvents(w http.ResponseWriter, r *http.Request) {

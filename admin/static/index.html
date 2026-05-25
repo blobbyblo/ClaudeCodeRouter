@@ -854,8 +854,31 @@ function usageChangePage(dir) {
 // ============================================================
 let liveES = null, livePaused = false, liveCount = 0;
 
+const LIVE_LOG_KEY = '_ccr_live_log';
+const LIVE_LOG_MAX = 500;
+
 function initLiveLog() {
+  restoreLiveLog();
   connectLive();
+}
+
+function restoreLiveLog() {
+  try {
+    const raw = sessionStorage.getItem(LIVE_LOG_KEY);
+    const rows = raw ? JSON.parse(raw) : [];
+    if (rows.length > 0) {
+      rows.forEach(r => _renderLiveRow(r));
+      liveCount = rows.length;
+      $id('live-empty').style.display = 'none';
+      $id('live-count').textContent = fmtNum(liveCount) + ' events';
+    }
+  } catch (_) {}
+}
+
+function _persistRows(rows) {
+  try {
+    sessionStorage.setItem(LIVE_LOG_KEY, JSON.stringify(rows.slice(-LIVE_LOG_MAX)));
+  } catch (_) {}
 }
 
 function connectLive() {
@@ -874,6 +897,17 @@ function connectLive() {
 }
 
 function appendLiveRow(r) {
+  _renderLiveRow(r);
+
+  try {
+    const raw = sessionStorage.getItem(LIVE_LOG_KEY);
+    const rows = raw ? JSON.parse(raw) : [];
+    rows.push(r);
+    _persistRows(rows);
+  } catch (_) {}
+}
+
+function _renderLiveRow(r) {
   liveCount++;
   $id('live-empty').style.display = 'none';
   $id('live-count').textContent = fmtNum(liveCount) + ' events';
@@ -920,6 +954,7 @@ function clearLive() {
   liveCount = 0;
   $id('live-count').textContent = '';
   $id('live-empty').style.display = '';
+  try { sessionStorage.removeItem(LIVE_LOG_KEY); } catch (_) {}
 }
 
 // ============================================================

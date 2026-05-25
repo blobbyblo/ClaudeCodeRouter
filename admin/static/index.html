@@ -208,6 +208,7 @@ tr:hover td { background: var(--surface-2); }
       <button data-tab="config">Config</button>
       <button data-tab="keys">Keys</button>
     </nav>
+    <button class="btn btn-ghost btn-sm" id="cfg-folder-btn" title="Copy config path" style="margin-left:8px;white-space:nowrap">Config</button>
     <span class="uptime-badge" id="uptime-badge"></span>
   </header>
   <main>
@@ -1392,6 +1393,24 @@ document.addEventListener('keydown', e => {
 });
 
 $id('mint-name').addEventListener('keydown', e => { if (e.key === 'Enter') mintKey(); });
+
+// ---- Config folder button ----
+(function setupConfigButton() {
+  const btn = $id('cfg-folder-btn');
+  const share = () => {
+    const p = navigator.clipboard
+      ? navigator.clipboard.writeText(btn.dataset.path || '')
+      : Promise.reject();
+    p.then(() => showToast('Config path copied to clipboard')).catch(() => {
+      const path = btn.dataset.path || '';
+      showToast('Path: ' + path, 'err');
+    });
+  };
+  btn.addEventListener('click', share);
+  apiFetch('/admin/api/config/path').then(data => {
+    if (data && data.path) btn.dataset.path = data.path;
+  }).catch(() => {});
+})();
 
 // ============================================================
 // Config hot-reload SSE

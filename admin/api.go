@@ -469,6 +469,14 @@ func (s *Server) handleConfigEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ---- /admin/api/config/path ------------------------------------------------
+
+func (s *Server) handleConfigPath(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{
+		"path": s.cfgPath,
+	})
+}
+
 // ---- /admin/api/config/raw ---------------------------------------------------
 
 func (s *Server) handleGetRawConfig(w http.ResponseWriter, r *http.Request) {

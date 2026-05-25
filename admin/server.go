@@ -111,6 +111,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		r.Post("/providers/{id}/keys", s.handleAddProviderKey)
 		r.Delete("/providers/{id}/keys/{keyId}", s.handleDeleteProviderKey)
 
+		r.Get("/config/path", s.handleConfigPath)
 		r.Get("/config/raw", s.handleGetRawConfig)
 		r.Post("/config/raw", s.handleSetRawConfig)
 		r.Get("/config/events", s.handleConfigEvents)

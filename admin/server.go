@@ -27,6 +27,7 @@ type Server struct {
 	database *sql.DB
 	bc       *middleware.Broadcaster
 	cfgPath  string
+	version  string
 
 	cfgSubsMu sync.Mutex
 	cfgSubs   map[chan struct{}]struct{}
@@ -42,6 +43,12 @@ func New(cfg *config.Manager, database *sql.DB, bc *middleware.Broadcaster, cfgP
 		cfgSubs:  make(map[chan struct{}]struct{}),
 	}
 }
+
+// SetVersion sets the version string exposed by /admin/api/version.
+func (s *Server) SetVersion(v string) { s.version = v }
+
+// SetCommit sets the commit hash (not yet used in UI, reserved for future).
+func (s *Server) SetCommit(c string) {}
 
 // NotifyConfigReload is called by the config manager after each successful
 // hot-reload. It fans out a signal to all connected config-event SSE clients.
@@ -89,6 +96,8 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	r.Route("/admin/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
 		r.Get("/info", s.handleInfo)
+		r.Get("/version", s.handleVersion)
+		r.Post("/update", s.handleUpdate)
 		r.Post("/test", s.handleTest)
 		r.Post("/restart", s.handleRestart)
 

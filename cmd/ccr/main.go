@@ -20,8 +20,13 @@ import (
 	"github.com/bobbyo/ccr/router"
 )
 
+// overridden by ldflags at build time
+var (
+	version = "cc-router dev"
+	commit  = "unknown"
+)
+
 func main() {
-	var version = "cc-router v0.1.0"
 	cfgPath := flag.String("config", "config.toml", "path to config.toml")
 	dbPath  := flag.String("db", "ccr.db", "path to SQLite database")
 	host    := flag.String("host", "127.0.0.1", "host address for the client-facing server (use 0.0.0.0 to expose on all interfaces)")
@@ -70,6 +75,8 @@ func main() {
 
 	// ---- Admin server ----
 	adminSrv := admin.New(cfgMgr, database, bc, *cfgPath)
+	adminSrv.SetVersion(version)
+	adminSrv.SetCommit(commit)
 	cfgMgr.SetReloadCallback(adminSrv.NotifyConfigReload)
 
 	// ---- Context / signal handling ----

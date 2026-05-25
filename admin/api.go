@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -467,6 +470,127 @@ func (s *Server) handleConfigEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// ---- /admin/api/version ------------------------------------------------
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{
+		"version": s.version,
+	})
+}
+
+// ---- /admin/api/update ------------------------------------------------
+
+// updateAsset builds the release asset file name for the current platform.
+func updateAsset() string {
+	var goos string
+	switch runtime.GOOS {
+	case "windows":
+		goos = "Windows"
+	case "linux":
+		goos = "Linux"
+	case "darwin":
+		goos = "Darwin"
+	default:
+		goos = runtime.GOOS
+	}
+	var goarch string
+	switch runtime.GOARCH {
+	case "amd64":
+		goarch = "x86_64"
+	case "arm64":
+		goarch = "arm64"
+	default:
+		goarch = runtime.GOARCH
+	}
+	if goos == "Windows" {
+		return fmt.Sprintf("cc-router_%s_%s.zip", goos, goarch)
+	}
+	return fmt.Sprintf("cc-router_%s_%s.tar.gz", goos, goarch)
+}
+
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{"status": "update check started"})
+	go func() {
+		// fetch latest release from GitHub API
+		resp, err := http.Get("https://api.github.com/repos/blobbyblo/ClaudeCodeRouter/releases/latest")
+		if err != nil {
+			slog.Error("update: failed to check for latest release", "err", err)
+			return
+		}
+		defer resp.Body.Close()
+		var rel struct {
+			TagName string `json:"tag_name"`
+			Assets  []struct {
+				Name string `json:"name"`
+				URL  string `json:"browser_download_url"`
+			} `json:"assets"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+			slog.Error("update: failed to decode release JSON", "err", err)
+			return
+		}
+
+		// compare tag (strip v prefix)
+		latestVer := strings.TrimPrefix(rel.TagName, "v")
+		curVer := strings.TrimPrefix(s.version, "v")
+		if latestVer == curVer {
+			slog.Info("update: already on latest version", "current", curVer, "latest", latestVer)
+			return
+		}
+
+		// find asset for current platform
+		assetName := updateAsset()
+		var assetURL string
+		for _, a := range rel.Assets {
+			if a.Name == assetName {
+				assetURL = a.URL
+				break
+			}
+		}
+		if assetURL == "" {
+			slog.Error("update: no asset found for platform", "want", assetName)
+			return
+		}
+
+		// download to temp file
+		tmp, err := os.CreateTemp("", "cc-router-update-*")
+		if err != nil {
+			slog.Error("update: failed to create temp file", "err", err)
+			return
+		}
+		defer os.Remove(tmp.Name())
+
+		resp2, err := http.Get(assetURL)
+		if err != nil {
+			slog.Error("update: failed to download asset", "err", err)
+			return
+		}
+		defer resp2.Body.Close()
+		if _, err := tmp.ReadFrom(resp2.Body); err != nil {
+			slog.Error("update: failed to write asset to temp file", "err", err)
+			return
+		}
+		tmp.Close()
+
+		// locate current binary path
+		execPath, err := os.Executable()
+		if err != nil {
+			slog.Error("update: failed to get executable path", "err", err)
+			return
+		}
+
+		// replace binary
+		if err := os.Rename(tmp.Name(), execPath); err != nil {
+			slog.Error("update: failed to replace binary", "err", err)
+			return
+		}
+
+		slog.Info("update: binary replaced; restarting", "from", curVer, "to", latestVer)
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
+	}()
 }
 
 // ---- /admin/api/config/path ------------------------------------------------

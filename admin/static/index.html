@@ -209,6 +209,8 @@ tr:hover td { background: var(--surface-2); }
       <button data-tab="keys">Keys</button>
     </nav>
     <button class="btn btn-ghost btn-sm" id="cfg-folder-btn" title="Copy config path" style="margin-left:8px;white-space:nowrap">Config</button>
+    <button class="btn btn-ghost btn-sm" id="restart-btn" title="Restart service" style="margin-left:4px" onclick="restartService()">Restart</button>
+    <button class="btn btn-ghost btn-sm" id="update-btn" title="Update available" style="margin-left:4px;display:none" onclick="triggerUpdate()">Update</button>
     <span class="uptime-badge" id="uptime-badge"></span>
   </header>
   <main>
@@ -1412,6 +1414,43 @@ $id('mint-name').addEventListener('keydown', e => { if (e.key === 'Enter') mintK
   }).catch(() => {});
 })();
 
+// ---- Restart button ----
+function restartService() {
+  if (!confirm('Restart the cc-router service now?')) return;
+  apiFetch('/admin/api/restart', { method: 'POST' })
+    .then(() => showToast('Service restarting…'))
+    .catch(() => showToast('Failed to restart', 'err'));
+}
+
+// ---- Update check ----
+let currentVersion = '';
+let updateAvailable = false;
+
+function stripV(v) { return String(v).replace(/^v/, ''); }
+
+function checkUpdate() {
+  apiFetch('/admin/api/version').then(data => {
+    if (data && data.version) currentVersion = data.version;
+    return fetch('https://api.github.com/repos/blobbyblo/ClaudeCodeRouter/releases/latest');
+  }).then(r => r.json()).then(data => {
+    const latest = stripV(data.tag_name);
+    const current = stripV(currentVersion);
+    if (latest && latest !== current) {
+      updateAvailable = true;
+      const btn = $id('update-btn');
+      btn.style.display = '';
+      btn.textContent = 'Update available (' + latest + ')';
+    }
+  }).catch(() => {});
+}
+
+function triggerUpdate() {
+  if (!confirm('Download the latest release and restart the service?')) return;
+  apiFetch('/admin/api/update', { method: 'POST' })
+    .then(() => showToast('Update started… service will restart shortly'))
+    .catch(() => showToast('Update failed', 'err'));
+}
+
 // ============================================================
 // Config hot-reload SSE
 // ============================================================
@@ -1448,6 +1487,7 @@ window.addEventListener('popstate', applyHash);
 // Bootstrap
 // ============================================================
 applyHash();
+checkUpdate();
 </script>
 </body>
 </html>

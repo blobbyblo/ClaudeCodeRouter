@@ -1,0 +1,20 @@
+# Normalize all text files to LF in the repo; checkout uses platform line endings
+* text=auto eol=lf
+
+# Force LF for files that must not be CRLF
+*.sh text eol=lf
+
+# Windows scripts are fine with LF too (PowerShell and cmd both handle it)
+*.ps1 text eol=lf
+*.bat text eol=lf
+
+# Workflows and config
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+
+# Binaries — do not touch
+*.exe binary
+*.zip binary
+*.tar.gz binary

@@ -4,7 +4,8 @@
 
 A local proxy that sits between your LLM clients and your providers. Point Claude Code, Cursor, or anything Anthropic/OpenAI-compatible at it, and it handles the rest.
 
-  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26+-00ADD8.svg" alt="Go 1.26+"></a>
+  [![CI](https://github.com/blobbyblo/ClaudeCodeRouter/actions/workflows/ci.yml/badge.svg)](https://github.com/blobbyblo/ClaudeCodeRouter/actions/workflows/ci.yml)
+  [![Release](https://github.com/blobbyblo/ClaudeCodeRouter/actions/workflows/release.yml/badge.svg)](https://github.com/blobbyblo/ClaudeCodeRouter/actions/workflows/release.yml)
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-3.40+-003B57.svg" alt="SQLite"></a>
 
@@ -58,25 +59,38 @@ It is particularly useful if you are:
 
 ## Quick Start
 
-### Prerequisites
+### Install (no Go required)
 
-- [Go](https://go.dev/) 1.26 or later
-- A valid API key for at least one LLM provider (Anthropic, OpenAI, NIM, Ollama, etc.)
+Download and run the install script for your platform — it fetches the latest pre-built binary from [GitHub Releases](https://github.com/blobbyblo/ClaudeCodeRouter/releases/latest).
 
-### Build & Run
+**Windows** — run `setup.bat` from the repo, or use the one-liner in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/blobbyblo/ClaudeCodeRouter/main/setup.ps1 | iex
+```
+
+**Linux / macOS** — run in your terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/blobbyblo/ClaudeCodeRouter/main/install.sh | bash
+```
+
+The script installs the binary, writes a sample `config.toml`, and optionally registers a background service.
+
+### Connect Your Client
+
+Use your client key (created via the admin dash) as the API key. Point your app at `http://127.0.0.1:4080/v1/messages` for Anthropic format, or `http://127.0.0.1:4080/v1/chat/completions` for OpenAI format.
+
+### For contributors (requires Go 1.26+)
 
 ```bash
 git clone https://github.com/blobbyblo/ClaudeCodeRouter.git
-cd ccr
+cd ClaudeCodeRouter
 make build            # outputs bin/ccr
 make run              # or go run ./cmd/ccr
 ```
 
 The server starts on port `4080` (client) and `4081` (admin dashboard). Edit `config.toml` to add your API keys and model aliases.
-
-### Connect Your Client
-
-Use your client key (created via the admin dash) as the API key. Point your app at `http://127.0.0.1:4080/v1/messages` for Anthropic format, or `http://127.0.0.1:4080/v1/chat/completions` for OpenAI format.
 
 ---
 

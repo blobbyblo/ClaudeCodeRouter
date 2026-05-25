@@ -13,6 +13,7 @@
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 function Test-Command ([string]$cmd) {
     return [bool](Get-Command $cmd -ErrorAction SilentlyContinue)

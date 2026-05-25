@@ -4,29 +4,27 @@
 .SYNOPSIS
     One-shot setup script for cc-router on Windows.
 .DESCRIPTION
-    - Installs Go if missing
-    - Builds the cc-router binary
+    - Downloads the latest cc-router release binary from GitHub
     - Installs it to the user's local bin directory
     - Ensures the bin directory is on the user PATH
     - Creates a sample config.toml if missing
 .NOTES
-    Run from the project root (the same directory as go.mod).
+    No Go installation required.
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 # ---------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------
-$ProjectRoot = $PSScriptRoot
-$GoVersion = "1.23.4"
+$Repo = "blobbyblo/ClaudeCodeRouter"
+$AssetName = "cc-router_Windows_x86_64.zip"
 $BinaryName = "cc-router.exe"
 $InstallDir = Join-Path $env:LOCALAPPDATA "cc-router"
 $BinDir = Join-Path $env:LOCALAPPDATA "bin"
 $BinaryPath = Join-Path $BinDir $BinaryName
-$GoDownloadUrl = "https://go.dev/dl/go${GoVersion}.windows-amd64.zip"
-$TempDir = Join-Path $env:TEMP "cc-router-setup"
 
 # ---------------------------------------------------------------
 # Helpers
@@ -51,75 +49,43 @@ function Ensure-Dir ([string]$dir) {
 }
 
 # ---------------------------------------------------------------
-# 1. Ensure Go is installed
+# 2. Download latest release binary
 # ---------------------------------------------------------------
-function Install-Go {
-    Write-Host "`n==> Go not found. Installing Go $GoVersion..." -ForegroundColor Cyan
+Write-Host "`n==> Downloading cc-router..." -ForegroundColor Cyan
 
-    Ensure-Dir $TempDir
-    $goZip = Join-Path $TempDir "go.zip"
-    $goInstallDir = Join-Path $env:LOCALAPPDATA "go"
+$TempZip = Join-Path $env:TEMP "cc-router-release.zip"
+$TempExtract = Join-Path $env:TEMP "cc-router-extract"
 
-    Write-Host "Downloading Go $GoVersion..."
-    Invoke-WebRequest -Uri $GoDownloadUrl -OutFile $goZip -ProgressPreference Continue
-
-    Write-Host "Extracting Go..."
-    Expand-Archive -Path $goZip -DestinationPath $TempDir -Force
-
-    # Remove old go installation if it exists
-    if (Test-Path $goInstallDir) {
-        Remove-Item -Recurse -Force $goInstallDir
-    }
-    Move-Item -Path (Join-Path $TempDir "go") -Destination $goInstallDir -Force
-
-    # Add Go to user PATH
-    $goBin = Join-Path $goInstallDir "bin"
-    if (-not (Test-Command "go")) {
-        Add-ToUserPath $goBin
-    }
-
-    # Refresh PATH for this session
-    $env:PATH = "$goBin;$env:PATH"
-    Remove-Item $goZip -ErrorAction SilentlyContinue
-
-    # Verify
-    if (Test-Command "go") {
-        Write-Host "Go installed: $(go version)" -ForegroundColor Green
-    } else {
-        throw "Go installation failed."
-    }
+Write-Host "Fetching latest release info..."
+$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" `
+    -Headers @{ "User-Agent" = "cc-router-setup" }
+$asset = $release.assets | Where-Object { $_.name -eq $AssetName }
+if (-not $asset) {
+    throw "Could not find release asset '$AssetName' in latest release $($release.tag_name)."
 }
 
-Write-Host "`n==> Checking for Go..." -ForegroundColor Cyan
-if (-not (Test-Command "go")) {
-    Install-Go
-} else {
-    Write-Host "Go is already installed: $(go version)" -ForegroundColor Green
+Write-Host "Downloading $AssetName (release $($release.tag_name))..."
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $TempZip
+
+Write-Host "Extracting..."
+if (Test-Path $TempExtract) { Remove-Item $TempExtract -Recurse -Force }
+Expand-Archive -Path $TempZip -DestinationPath $TempExtract -Force
+Remove-Item $TempZip -ErrorAction SilentlyContinue
+
+$extractedBinary = Get-ChildItem -Path $TempExtract -Recurse -Filter $BinaryName |
+    Select-Object -First 1
+if (-not $extractedBinary) {
+    throw "Binary '$BinaryName' not found after extraction."
 }
-
-# ---------------------------------------------------------------
-# 2. Download dependencies & build
-# ---------------------------------------------------------------
-Write-Host "`n==> Building cc-router..." -ForegroundColor Cyan
-Set-Location $ProjectRoot
-
-Write-Host "Downloading Go modules..."
-go mod download
-
-Write-Host "Compiling binary..."
-go build -ldflags="-s -w" -o (Join-Path $ProjectRoot "cc-router.exe") ./cmd/ccr
-
-if (-not (Test-Path (Join-Path $ProjectRoot "cc-router.exe"))) {
-    throw "Build failed. Binary not found."
-}
-Write-Host "Build successful." -ForegroundColor Green
+Write-Host "Download successful." -ForegroundColor Green
 
 # ---------------------------------------------------------------
 # 3. Install to user bin
 # ---------------------------------------------------------------
 Write-Host "`n==> Installing binary..." -ForegroundColor Cyan
 Ensure-Dir $BinDir
-Copy-Item -Path (Join-Path $ProjectRoot "cc-router.exe") -Destination $BinaryPath -Force
+Copy-Item -Path $extractedBinary.FullName -Destination $BinaryPath -Force
+Remove-Item $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Installed to: $BinaryPath" -ForegroundColor Green
 
 $env:PATH = "$BinDir;$env:PATH"

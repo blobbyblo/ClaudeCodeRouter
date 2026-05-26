@@ -375,27 +375,72 @@ func TestOpenAIProvider_ContextCancellation(t *testing.T) {
 	}
 }
 
+// assertNoTypeInProps recursively asserts that no object in the schema has a
+// property named "type" — that is, no key in any "properties" map equals "type".
+func assertNoTypeInProps(t *testing.T, raw json.RawMessage, path string) {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return // not an object
+	}
+	if propsRaw, ok := obj["properties"]; ok {
+		var props map[string]json.RawMessage
+		if err := json.Unmarshal(propsRaw, &props); err != nil {
+			t.Fatalf("%s: properties not valid JSON: %v", path, err)
+		}
+		if _, hasType := props["type"]; hasType {
+			t.Errorf("%s: properties still contains 'type' key after sanitize", path)
+		}
+		for k, v := range props {
+			assertNoTypeInProps(t, v, path+".properties."+k)
+		}
+	}
+	if itemsRaw, ok := obj["items"]; ok {
+		assertNoTypeInProps(t, itemsRaw, path+".items")
+	}
+	if addRaw, ok := obj["additionalProperties"]; ok {
+		assertNoTypeInProps(t, addRaw, path+".additionalProperties")
+	}
+}
+
 func TestSanitizeParameterSchema(t *testing.T) {
 	cases := []struct {
-		name  string
-		input string
-		want  string // subset: check "type" is absent from properties
-		kept  bool   // whether the schema should change at all
+		name    string
+		input   string
+		changed bool // whether the schema should be modified
 	}{
 		{
-			name:  "no conflict",
-			input: `{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}}}`,
-			kept:  false,
+			name:    "no conflict",
+			input:   `{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}}}`,
+			changed: false,
 		},
 		{
-			name:  "type property removed",
-			input: `{"type":"object","properties":{"pattern":{"type":"string"},"type":{"type":"string"}},"required":["pattern","type"]}`,
-			kept:  true,
+			name:    "top-level type property removed",
+			input:   `{"type":"object","properties":{"pattern":{"type":"string"},"type":{"type":"string"}},"required":["pattern","type"]}`,
+			changed: true,
 		},
 		{
-			name:  "type property removed from required",
-			input: `{"type":"object","properties":{"a":{"type":"string"},"type":{"type":"string"}},"required":["a","type"]}`,
-			kept:  true,
+			name:    "type property removed from required",
+			input:   `{"type":"object","properties":{"a":{"type":"string"},"type":{"type":"string"}},"required":["a","type"]}`,
+			changed: true,
+		},
+		{
+			// Regression: nested object property named "type" was not previously sanitized.
+			name:    "nested type property removed",
+			input:   `{"type":"object","properties":{"options":{"type":"object","properties":{"type":{"type":"string"},"name":{"type":"string"}}}}}`,
+			changed: true,
+		},
+		{
+			// Regression: "type" property inside array items schema.
+			name:    "type property in array items removed",
+			input:   `{"type":"object","properties":{"items":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string"},"value":{"type":"string"}}}}}}`,
+			changed: true,
+		},
+		{
+			// Regression: "type" property inside additionalProperties schema.
+			name:    "type property in additionalProperties removed",
+			input:   `{"type":"object","additionalProperties":{"type":"object","properties":{"type":{"type":"string"}}}}`,
+			changed: true,
 		},
 	}
 
@@ -403,26 +448,17 @@ func TestSanitizeParameterSchema(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out := sanitizeParameterSchema(json.RawMessage(tc.input))
 
-			var schema map[string]json.RawMessage
-			if err := json.Unmarshal(out, &schema); err != nil {
+			if _, err := json.Marshal(out); err != nil {
 				t.Fatalf("output not valid JSON: %v", err)
 			}
 
-			if propsRaw, ok := schema["properties"]; ok {
-				var props map[string]json.RawMessage
-				if err := json.Unmarshal(propsRaw, &props); err != nil {
-					t.Fatalf("properties not valid JSON: %v", err)
-				}
-				if _, hasType := props["type"]; hasType {
-					t.Error("properties still contains 'type' key after sanitize")
-				}
-			}
+			assertNoTypeInProps(t, out, "schema")
 
-			changed := string(out) != tc.input
-			if tc.kept && !changed {
+			gotChanged := string(out) != tc.input
+			if tc.changed && !gotChanged {
 				t.Error("expected schema to be modified but it was not")
 			}
-			if !tc.kept && changed {
+			if !tc.changed && gotChanged {
 				t.Errorf("expected schema unchanged but got %s", out)
 			}
 		})

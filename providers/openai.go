@@ -102,49 +102,90 @@ type openAIToolCall struct {
 // causing an "unhashable type: 'dict'" 500 error when a tool property is named "type".
 var nimConflictingProps = map[string]bool{"type": true}
 
-// sanitizeParameterSchema removes properties whose names conflict with JSON Schema
-// keywords (confirmed: "type") from a parameters schema before sending to NIM.
-// It also removes those names from the "required" array if present.
+// sanitizeParameterSchema recursively removes property names that conflict with
+// JSON Schema keywords (e.g. "type") from a tool parameters schema at every
+// nesting level before sending to NIM. NIM's Python backend conflates a
+// property named "type" with the JSON Schema "type" keyword, yielding
+// "unhashable type: 'dict'" (HTTP 500). The shallow fix only caught top-level
+// conflicts; this recursive version also handles nested object schemas,
+// array item schemas, and additionalProperties schemas.
 func sanitizeParameterSchema(schema json.RawMessage) json.RawMessage {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(schema, &obj); err != nil {
-		return schema
+		return schema // not a JSON object (e.g. boolean additionalProperties)
 	}
-	propsRaw, ok := obj["properties"]
-	if !ok {
-		return schema
-	}
-	var props map[string]json.RawMessage
-	if err := json.Unmarshal(propsRaw, &props); err != nil {
-		return schema
-	}
+
 	modified := false
-	for key := range props {
-		if nimConflictingProps[key] {
-			delete(props, key)
+
+	// Sanitize properties: remove conflicting names, recurse into each schema,
+	// and prune any removed names from the sibling "required" array.
+	if propsRaw, ok := obj["properties"]; ok {
+		var props map[string]json.RawMessage
+		if err := json.Unmarshal(propsRaw, &props); err == nil {
+			propsModified := false
+			var removedNames []string
+
+			for key := range props {
+				if nimConflictingProps[key] {
+					delete(props, key)
+					removedNames = append(removedNames, key)
+					propsModified = true
+				}
+			}
+			for key, propSchema := range props {
+				if sanitized := sanitizeParameterSchema(propSchema); string(sanitized) != string(propSchema) {
+					props[key] = sanitized
+					propsModified = true
+				}
+			}
+			if propsModified {
+				newProps, _ := json.Marshal(props)
+				obj["properties"] = json.RawMessage(newProps)
+				modified = true
+			}
+			if len(removedNames) > 0 {
+				removedSet := make(map[string]bool, len(removedNames))
+				for _, r := range removedNames {
+					removedSet[r] = true
+				}
+				if reqRaw, ok2 := obj["required"]; ok2 {
+					var required []string
+					if json.Unmarshal(reqRaw, &required) == nil {
+						filtered := required[:0]
+						for _, r := range required {
+							if !removedSet[r] {
+								filtered = append(filtered, r)
+							}
+						}
+						if len(filtered) != len(required) {
+							rb, _ := json.Marshal(filtered)
+							obj["required"] = json.RawMessage(rb)
+							modified = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Recurse into array item schemas.
+	if itemsRaw, ok := obj["items"]; ok {
+		if sanitized := sanitizeParameterSchema(itemsRaw); string(sanitized) != string(itemsRaw) {
+			obj["items"] = sanitized
 			modified = true
 		}
 	}
+
+	// Recurse into additionalProperties (skipped silently when it's a boolean).
+	if addRaw, ok := obj["additionalProperties"]; ok {
+		if sanitized := sanitizeParameterSchema(addRaw); string(sanitized) != string(addRaw) {
+			obj["additionalProperties"] = sanitized
+			modified = true
+		}
+	}
+
 	if !modified {
 		return schema
-	}
-	newProps, _ := json.Marshal(props)
-	obj["properties"] = json.RawMessage(newProps)
-	if reqRaw, ok2 := obj["required"]; ok2 {
-		var required []string
-		if json.Unmarshal(reqRaw, &required) == nil {
-			filtered := required[:0]
-			for _, r := range required {
-				if !nimConflictingProps[r] {
-					filtered = append(filtered, r)
-				}
-			}
-			if len(filtered) != len(required) {
-				if rb, err := json.Marshal(filtered); err == nil {
-					obj["required"] = json.RawMessage(rb)
-				}
-			}
-		}
 	}
 	result, _ := json.Marshal(obj)
 	return json.RawMessage(result)

@@ -26,7 +26,25 @@ var (
 	commit  = "unknown"
 )
 
+// cleanupOldBinary removes a leftover .old binary from a previous self-update
+// on Windows (the running executable cannot be deleted, so it is renamed aside
+// and cleaned up here on the next startup).
+func cleanupOldBinary() {
+	execPath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	oldPath := execPath + ".old"
+	if err := os.Remove(oldPath); err == nil {
+		slog.Info("startup: removed old binary", "path", oldPath)
+	}
+}
+
 func main() {
+	// Configure a basic logger early so startup messages (e.g. cleanupOldBinary)
+	// are captured; it is reconfigured after the config file is loaded.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	cleanupOldBinary()
 	cfgPath := flag.String("config", "config.toml", "path to config.toml")
 	dbPath  := flag.String("db", "ccr.db", "path to SQLite database")
 	host    := flag.String("host", "127.0.0.1", "host address for the client-facing server (use 0.0.0.0 to expose on all interfaces)")

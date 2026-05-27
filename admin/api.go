@@ -1,15 +1,20 @@
 package admin
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -513,13 +518,20 @@ func updateAsset() string {
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "update check started"})
 	go func() {
+		apiClient := &http.Client{Timeout: 30 * time.Second}
+		dlClient := &http.Client{Timeout: 10 * time.Minute}
+
 		// fetch latest release from GitHub API
-		resp, err := http.Get("https://api.github.com/repos/blobbyblo/ClaudeCodeRouter/releases/latest")
+		resp, err := apiClient.Get("https://api.github.com/repos/blobbyblo/ClaudeCodeRouter/releases/latest")
 		if err != nil {
 			slog.Error("update: failed to check for latest release", "err", err)
 			return
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			slog.Error("update: GitHub API returned non-200", "status", resp.StatusCode)
+			return
+		}
 		var rel struct {
 			TagName string `json:"tag_name"`
 			Assets  []struct {
@@ -554,25 +566,30 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// download to temp file
-		tmp, err := os.CreateTemp("", "cc-router-update-*")
+		// download archive to a temp file
+		archiveTmp, err := os.CreateTemp("", "cc-router-update-*")
 		if err != nil {
 			slog.Error("update: failed to create temp file", "err", err)
 			return
 		}
-		defer os.Remove(tmp.Name())
+		archiveTmpName := archiveTmp.Name()
+		defer os.Remove(archiveTmpName)
 
-		resp2, err := http.Get(assetURL)
+		resp2, err := dlClient.Get(assetURL)
 		if err != nil {
 			slog.Error("update: failed to download asset", "err", err)
 			return
 		}
 		defer resp2.Body.Close()
-		if _, err := tmp.ReadFrom(resp2.Body); err != nil {
+		if resp2.StatusCode != http.StatusOK {
+			slog.Error("update: asset download returned non-200", "status", resp2.StatusCode)
+			return
+		}
+		if _, err := archiveTmp.ReadFrom(resp2.Body); err != nil {
 			slog.Error("update: failed to write asset to temp file", "err", err)
 			return
 		}
-		tmp.Close()
+		archiveTmp.Close()
 
 		// locate current binary path
 		execPath, err := os.Executable()
@@ -581,8 +598,47 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// replace binary
-		if err := os.Rename(tmp.Name(), execPath); err != nil {
+		// extract binary into the same directory as the current executable so
+		// that os.Rename can move it into place without a cross-device error.
+		execDir := filepath.Dir(execPath)
+		newTmp, err := os.CreateTemp(execDir, ".cc-router-new-*")
+		if err != nil {
+			slog.Error("update: failed to create staging file", "err", err)
+			return
+		}
+		newTmpName := newTmp.Name()
+		defer os.Remove(newTmpName)
+
+		if err := extractBinary(archiveTmpName, newTmp, assetName); err != nil {
+			newTmp.Close()
+			slog.Error("update: failed to extract binary from archive", "err", err)
+			return
+		}
+		newTmp.Close()
+
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(newTmpName, 0755); err != nil {
+				slog.Error("update: failed to chmod new binary", "err", err)
+				return
+			}
+		}
+
+		// On Windows a running executable cannot be overwritten, but it can be
+		// renamed.  Move the current binary aside first, then rename the new
+		// one into place.  The .old file is cleaned up on next startup.
+		if runtime.GOOS == "windows" {
+			backupPath := execPath + ".old"
+			_ = os.Remove(backupPath) // best-effort cleanup of a prior attempt
+			if err := os.Rename(execPath, backupPath); err != nil {
+				slog.Error("update: failed to move current binary aside", "err", err)
+				return
+			}
+		}
+
+		if err := os.Rename(newTmpName, execPath); err != nil {
+			if runtime.GOOS == "windows" {
+				_ = os.Rename(execPath+".old", execPath) // try to restore
+			}
 			slog.Error("update: failed to replace binary", "err", err)
 			return
 		}
@@ -591,6 +647,62 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 		os.Exit(0)
 	}()
+}
+
+// extractBinary copies the cc-router binary out of a release archive into dst.
+func extractBinary(archivePath string, dst *os.File, assetName string) error {
+	if strings.HasSuffix(assetName, ".zip") {
+		return extractZip(archivePath, dst)
+	}
+	return extractTarGz(archivePath, dst)
+}
+
+func extractZip(archivePath string, dst *os.File) error {
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if strings.HasSuffix(f.Name, ".exe") {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(dst, rc)
+			rc.Close()
+			return err
+		}
+	}
+	return fmt.Errorf("update: no .exe found in zip")
+}
+
+func extractTarGz(archivePath string, dst *os.File) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if hdr.Typeflag == tar.TypeReg && filepath.Base(hdr.Name) == "cc-router" {
+			_, err = io.Copy(dst, tr)
+			return err
+		}
+	}
+	return fmt.Errorf("update: no binary found in tar.gz")
 }
 
 // ---- /admin/api/config/path ------------------------------------------------

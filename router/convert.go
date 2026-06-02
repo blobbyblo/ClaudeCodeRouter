@@ -354,9 +354,10 @@ type openAIChoiceOut struct {
 }
 
 type openAIDeltaOut struct {
-	Role      string               `json:"role,omitempty"`
-	Content   string               `json:"content,omitempty"`
-	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
+	Role             string               `json:"role,omitempty"`
+	Content          string               `json:"content,omitempty"`
+	ReasoningContent string               `json:"reasoning_content,omitempty"`
+	ToolCalls        []openAIToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 // openAIToolCallDelta is one entry in the tool_calls delta array for streaming.
@@ -520,6 +521,7 @@ func (c *openAIStreamConverter) convertEvent(eventType, data string) error {
 			Delta struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
+				Thinking    string `json:"thinking"`
 				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
 		}
@@ -535,6 +537,20 @@ func (c *openAIStreamConverter) convertEvent(eventType, data string) error {
 				b, _ := json.Marshal(chunk)
 				_, err := fmt.Fprintf(c.dst, "data: %s\n\n", b)
 				return err
+			case "thinking_delta":
+				// Forward thinking content as reasoning_content so VS Code renders it
+				// in its collapsible "Thinking" section rather than as plain chat text.
+				if cbd.Delta.Thinking != "" {
+					chunk := openAIChunkOut{
+						ID:     c.msgID,
+						Object: "chat.completion.chunk",
+						Model:  c.model,
+						Choices: []openAIChoiceOut{{Index: 0, Delta: openAIDeltaOut{ReasoningContent: cbd.Delta.Thinking}}},
+					}
+					b, _ := json.Marshal(chunk)
+					_, err := fmt.Fprintf(c.dst, "data: %s\n\n", b)
+					return err
+				}
 			case "input_json_delta":
 				if toolIdx, ok := c.blockToolIdx[cbd.Index]; ok && cbd.Delta.PartialJSON != "" {
 					chunk := openAIChunkOut{

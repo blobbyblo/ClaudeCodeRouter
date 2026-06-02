@@ -21,6 +21,8 @@ type openAIRequest struct {
 	TopP          *float64        `json:"top_p,omitempty"`
 	Stop          []string        `json:"stop,omitempty"`
 	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
+	Tools         []openAITool    `json:"tools,omitempty"`
+	ToolChoice    json.RawMessage `json:"tool_choice,omitempty"`
 }
 
 type streamOptions struct {
@@ -28,19 +30,31 @@ type streamOptions struct {
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
 }
 
 type openAITool struct {
-    Type     string          `json:"type"`
-    Function openAIFunction  `json:"function"`
+	Type     string         `json:"type"`
+	Function openAIFunction `json:"function"`
 }
 
 type openAIFunction struct {
-    Name        string          `json:"name"`
-    Description string          `json:"description,omitempty"`
-    Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// openAIToolCallInMsg is the shape of a single entry in an assistant message's tool_calls array.
+type openAIToolCallInMsg struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 // OpenAIToAnthropic converts an OpenAI chat completions request body to our
@@ -53,19 +67,133 @@ func OpenAIToAnthropic(body []byte) (providers.AnthropicRequest, error) {
 
 	var sysRaw json.RawMessage
 	var msgs []providers.Message
+	var pendingToolResults []providers.ContentBlock
+
+	flushToolResults := func() {
+		if len(pendingToolResults) > 0 {
+			msgs = append(msgs, providers.Message{
+				Role:    "user",
+				Content: pendingToolResults,
+			})
+			pendingToolResults = nil
+		}
+	}
 
 	for _, m := range oai.Messages {
-		if m.Role == "system" {
-			b, _ := json.Marshal(m.Content)
-			sysRaw = json.RawMessage(b)
+		// Tool result messages: accumulate consecutive ones into a single user message.
+		if m.Role == "tool" {
+			var content string
+			_ = json.Unmarshal(m.Content, &content)
+			pendingToolResults = append(pendingToolResults, providers.ContentBlock{
+				Type:      "tool_result",
+				ToolUseID: m.ToolCallID,
+				Content:   []providers.ContentBlock{{Type: "text", Text: content}},
+			})
 			continue
 		}
-		msgs = append(msgs, providers.Message{
-			Role: m.Role,
-			Content: []providers.ContentBlock{
-				{Type: "text", Text: m.Content},
-			},
-		})
+
+		// Flush any accumulated tool results before this non-tool message.
+		flushToolResults()
+
+		if m.Role == "system" {
+			var s string
+			if err := json.Unmarshal(m.Content, &s); err == nil {
+				b, _ := json.Marshal(s)
+				sysRaw = json.RawMessage(b)
+			}
+			continue
+		}
+
+		// Extract text content (may be absent/null for tool-only assistant turns).
+		var textContent string
+		_ = json.Unmarshal(m.Content, &textContent)
+
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			// Convert tool_calls array to Anthropic tool_use content blocks.
+			var toolCalls []openAIToolCallInMsg
+			if err := json.Unmarshal(m.ToolCalls, &toolCalls); err == nil {
+				var content []providers.ContentBlock
+				if textContent != "" {
+					content = append(content, providers.ContentBlock{Type: "text", Text: textContent})
+				}
+				for _, tc := range toolCalls {
+					inputJSON := json.RawMessage(tc.Function.Arguments)
+					if len(inputJSON) == 0 {
+						inputJSON = json.RawMessage(`{}`)
+					}
+					content = append(content, providers.ContentBlock{
+						Type:      "tool_use",
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						InputJSON: inputJSON,
+					})
+				}
+				msgs = append(msgs, providers.Message{Role: "assistant", Content: content})
+				continue
+			}
+		}
+
+		if textContent != "" {
+			msgs = append(msgs, providers.Message{
+				Role:    m.Role,
+				Content: []providers.ContentBlock{{Type: "text", Text: textContent}},
+			})
+		}
+	}
+	// Flush any trailing tool results.
+	flushToolResults()
+
+	// Convert OpenAI tools → Anthropic tools.
+	var toolsRaw json.RawMessage
+	if len(oai.Tools) > 0 {
+		type anthropicTool struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description,omitempty"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		}
+		anthropicTools := make([]anthropicTool, len(oai.Tools))
+		for i, t := range oai.Tools {
+			schema := t.Function.Parameters
+			if len(schema) == 0 {
+				schema = json.RawMessage(`{"type":"object","properties":{}}`)
+			}
+			anthropicTools[i] = anthropicTool{
+				Name:        t.Function.Name,
+				Description: t.Function.Description,
+				InputSchema: schema,
+			}
+		}
+		b, _ := json.Marshal(anthropicTools)
+		toolsRaw = json.RawMessage(b)
+	}
+
+	// Convert OpenAI tool_choice → Anthropic tool_choice.
+	// OpenAI: "auto" | "none" | "required" | {"type":"function","function":{"name":"..."}}
+	// Anthropic: {"type":"auto"} | {"type":"any"} | {"type":"tool","name":"..."}
+	var toolChoiceRaw json.RawMessage
+	if len(oai.ToolChoice) > 0 {
+		var tcStr string
+		if err := json.Unmarshal(oai.ToolChoice, &tcStr); err == nil {
+			switch tcStr {
+			case "auto", "none":
+				toolChoiceRaw, _ = json.Marshal(map[string]string{"type": "auto"})
+			case "required":
+				toolChoiceRaw, _ = json.Marshal(map[string]string{"type": "any"})
+			}
+		} else {
+			var tcObj struct {
+				Type     string `json:"type"`
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			}
+			if err := json.Unmarshal(oai.ToolChoice, &tcObj); err == nil && tcObj.Type == "function" {
+				toolChoiceRaw, _ = json.Marshal(map[string]interface{}{
+					"type": "tool",
+					"name": tcObj.Function.Name,
+				})
+			}
+		}
 	}
 
 	maxTokens := oai.MaxTokens
@@ -82,6 +210,8 @@ func OpenAIToAnthropic(body []byte) (providers.AnthropicRequest, error) {
 		Temperature: oai.Temperature,
 		TopP:        oai.TopP,
 		StopSeq:     oai.Stop,
+		Tools:       toolsRaw,
+		ToolChoice:  toolChoiceRaw,
 	}, nil
 }
 
@@ -107,7 +237,8 @@ func AnthropicBodyToRequest(body []byte) (providers.AnthropicRequest, error) {
 func AnthropicToOpenAI(req providers.AnthropicRequest, modelID string) ([]byte, error) {
 	var msgs []openAIMessage
 	if sysText := providers.SystemText(req.System); sysText != "" {
-		msgs = append(msgs, openAIMessage{Role: "system", Content: sysText})
+		b, _ := json.Marshal(sysText)
+		msgs = append(msgs, openAIMessage{Role: "system", Content: json.RawMessage(b)})
 	}
 	for _, m := range req.Messages {
 		var parts []string
@@ -116,9 +247,11 @@ func AnthropicToOpenAI(req providers.AnthropicRequest, modelID string) ([]byte, 
 				parts = append(parts, b.Text)
 			}
 		}
+		text := strings.Join(parts, "")
+		b, _ := json.Marshal(text)
 		msgs = append(msgs, openAIMessage{
 			Role:    m.Role,
-			Content: strings.Join(parts, ""),
+			Content: json.RawMessage(b),
 		})
 	}
 
@@ -221,8 +354,25 @@ type openAIChoiceOut struct {
 }
 
 type openAIDeltaOut struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role      string               `json:"role,omitempty"`
+	Content   string               `json:"content,omitempty"`
+	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// openAIToolCallDelta is one entry in the tool_calls delta array for streaming.
+type openAIToolCallDelta struct {
+	Index    int                 `json:"index"`
+	ID       string              `json:"id,omitempty"`
+	Type     string              `json:"type,omitempty"`
+	Function openAIFunctionDelta `json:"function"`
+}
+
+// openAIFunctionDelta carries streaming function name and/or partial arguments.
+// Arguments is not omitempty so that the initial "" value is always transmitted,
+// which is required by the OpenAI streaming protocol.
+type openAIFunctionDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments"`
 }
 
 type openAIUsageOut struct {
@@ -243,10 +393,19 @@ type openAIStreamConverter struct {
 	msgID       string
 	model       string
 	emittedRole bool
+	// blockToolIdx maps Anthropic content-block index → OpenAI tool_calls array index.
+	// Only populated for tool_use blocks.
+	blockToolIdx  map[int]int
+	toolCallCount int
 }
 
 func newOpenAIStreamConverter(dst io.Writer) *openAIStreamConverter {
-	return &openAIStreamConverter{dst: dst, msgID: "chatcmpl-ccr", model: "ccr"}
+	return &openAIStreamConverter{
+		dst:          dst,
+		msgID:        "chatcmpl-ccr",
+		model:        "ccr",
+		blockToolIdx: make(map[int]int),
+	}
 }
 
 func (c *openAIStreamConverter) Write(p []byte) (int, error) {
@@ -317,23 +476,86 @@ func (c *openAIStreamConverter) convertEvent(eventType, data string) error {
 			return err
 		}
 
-	case "content_block_delta":
-		var delta struct {
-			Delta struct {
+	case "content_block_start":
+		// Detect tool_use blocks and emit the initial tool_calls delta with id and name.
+		var cbs struct {
+			Index        int `json:"index"`
+			ContentBlock struct {
 				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"delta"`
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"content_block"`
 		}
-		if json.Unmarshal([]byte(data), &delta) == nil && delta.Delta.Type == "text_delta" {
+		if json.Unmarshal([]byte(data), &cbs) == nil && cbs.ContentBlock.Type == "tool_use" {
+			toolIdx := c.toolCallCount
+			c.toolCallCount++
+			c.blockToolIdx[cbs.Index] = toolIdx
 			chunk := openAIChunkOut{
-				ID:      c.msgID,
-				Object:  "chat.completion.chunk",
-				Model:   c.model,
-				Choices: []openAIChoiceOut{{Index: 0, Delta: openAIDeltaOut{Content: delta.Delta.Text}}},
+				ID:     c.msgID,
+				Object: "chat.completion.chunk",
+				Model:  c.model,
+				Choices: []openAIChoiceOut{{
+					Index: 0,
+					Delta: openAIDeltaOut{
+						ToolCalls: []openAIToolCallDelta{{
+							Index: toolIdx,
+							ID:    cbs.ContentBlock.ID,
+							Type:  "function",
+							Function: openAIFunctionDelta{
+								Name:      cbs.ContentBlock.Name,
+								Arguments: "",
+							},
+						}},
+					},
+				}},
 			}
 			b, _ := json.Marshal(chunk)
 			_, err := fmt.Fprintf(c.dst, "data: %s\n\n", b)
 			return err
+		}
+
+	case "content_block_delta":
+		var cbd struct {
+			Index int `json:"index"`
+			Delta struct {
+				Type        string `json:"type"`
+				Text        string `json:"text"`
+				PartialJSON string `json:"partial_json"`
+			} `json:"delta"`
+		}
+		if json.Unmarshal([]byte(data), &cbd) == nil {
+			switch cbd.Delta.Type {
+			case "text_delta":
+				chunk := openAIChunkOut{
+					ID:      c.msgID,
+					Object:  "chat.completion.chunk",
+					Model:   c.model,
+					Choices: []openAIChoiceOut{{Index: 0, Delta: openAIDeltaOut{Content: cbd.Delta.Text}}},
+				}
+				b, _ := json.Marshal(chunk)
+				_, err := fmt.Fprintf(c.dst, "data: %s\n\n", b)
+				return err
+			case "input_json_delta":
+				if toolIdx, ok := c.blockToolIdx[cbd.Index]; ok && cbd.Delta.PartialJSON != "" {
+					chunk := openAIChunkOut{
+						ID:     c.msgID,
+						Object: "chat.completion.chunk",
+						Model:  c.model,
+						Choices: []openAIChoiceOut{{
+							Index: 0,
+							Delta: openAIDeltaOut{
+								ToolCalls: []openAIToolCallDelta{{
+									Index:    toolIdx,
+									Function: openAIFunctionDelta{Arguments: cbd.Delta.PartialJSON},
+								}},
+							},
+						}},
+					}
+					b, _ := json.Marshal(chunk)
+					_, err := fmt.Fprintf(c.dst, "data: %s\n\n", b)
+					return err
+				}
+			}
 		}
 
 	case "message_delta":

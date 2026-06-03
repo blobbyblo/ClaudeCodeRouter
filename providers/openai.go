@@ -291,7 +291,7 @@ func convertToOpenAI(req AnthropicRequest, modelID string) openAIRequest {
 		if err := json.Unmarshal(req.Tools, &anthropicTools); err == nil {
 			type oaiFunction struct {
 				Name        string          `json:"name"`
-				Description string          `json:"description,omitempty"`
+				Description string          `json:"description"`
 				Parameters  json.RawMessage `json:"parameters"`
 			}
 			type oaiTool struct {

@@ -127,6 +127,39 @@ alias = "smart"
 	}
 }
 
+func TestUpsertModel_PreservesExistingConfigAcrossSuccessiveWrites(t *testing.T) {
+	path := writeTempConfig(t, `
+[providers.openrouter]
+base_url = "https://openrouter.ai/api"
+convention = "openai"
+
+[[models]]
+alias = "default"
+providers = [{provider = "openrouter", model_id = "openrouter/free"}]
+`)
+	mgr, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.UpsertModel(ModelConfig{Alias: "haiku", Providers: []ModelProvider{{Provider: "openrouter", ModelID: "openrouter/free"}}}, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.UpsertModel(ModelConfig{Alias: "sonnet", Providers: []ModelProvider{{Provider: "openrouter", ModelID: "openrouter/free"}}}, path); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := parseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.Providers["openrouter"]; !ok {
+		t.Fatal("provider was lost across successive writes")
+	}
+	if len(got.Models) != 3 {
+		t.Fatalf("models = %d, want 3", len(got.Models))
+	}
+}
+
 func TestLoad_MissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nonexistent.toml")
 

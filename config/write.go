@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
@@ -12,7 +13,10 @@ func (m *Manager) UpsertModel(model ModelConfig, path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	cfg := m.current.clone()
+	cfg, err := writableConfig(path)
+	if err != nil {
+		return err
+	}
 	updated := false
 	for i, mod := range cfg.Models {
 		if mod.Alias == model.Alias {
@@ -37,7 +41,10 @@ func (m *Manager) DeleteModel(alias, path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	cfg := m.current.clone()
+	cfg, err := writableConfig(path)
+	if err != nil {
+		return err
+	}
 	models := cfg.Models[:0]
 	for _, mod := range cfg.Models {
 		if mod.Alias != alias {
@@ -58,7 +65,10 @@ func (m *Manager) DeleteProvider(id, path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	cfg := m.current.clone()
+	cfg, err := writableConfig(path)
+	if err != nil {
+		return err
+	}
 	delete(cfg.Providers, id)
 
 	if err := writeConfig(cfg, path); err != nil {
@@ -73,7 +83,10 @@ func (m *Manager) UpsertProvider(id string, prov ProviderConfig, path string) er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	cfg := m.current.clone()
+	cfg, err := writableConfig(path)
+	if err != nil {
+		return err
+	}
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderConfig)
 	}
@@ -84,6 +97,17 @@ func (m *Manager) UpsertProvider(id string, prov ProviderConfig, path string) er
 	}
 	m.current = cfg
 	return nil
+}
+
+// writableConfig starts each dashboard mutation from the latest complete
+// on-disk config. This prevents a delayed file-watcher reload from causing a
+// later request to overwrite a model or provider that was just saved.
+func writableConfig(path string) (*Config, error) {
+	cfg, err := parseFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config.write: load current config: %w", err)
+	}
+	return cfg, nil
 }
 
 // clone makes a shallow copy of Config so mutations don't affect the live config
@@ -99,17 +123,26 @@ func (c *Config) clone() *Config {
 	return &cp
 }
 
-// writeConfig serialises cfg to the given TOML file.
+// writeConfig atomically replaces the config file, so the hot-reload watcher
+// never observes an empty or partially written document.
 func writeConfig(cfg *Config, path string) error {
-	f, err := os.Create(path)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
 	if err != nil {
-		return fmt.Errorf("config.write: create %q: %w", path, err)
+		return fmt.Errorf("config.write: create temporary file: %w", err)
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
 
-	enc := toml.NewEncoder(f)
+	enc := toml.NewEncoder(tmp)
 	if err := enc.Encode(cfg); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("config.write: encode: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("config.write: close temporary file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("config.write: replace %q: %w", path, err)
 	}
 	return nil
 }

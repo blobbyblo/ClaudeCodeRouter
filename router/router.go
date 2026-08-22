@@ -354,7 +354,11 @@ func (rt *Router) fallbackChain(ctx context.Context, cfg *config.Config, req pro
 		// Providers only write to w after a confirmed 200 response, so pre-stream
 		// errors (429, 5xx, or attempt-start timeouts) leave w untouched and we
 		// can safely try the next one.
-		in, out, keyFallbacks, err := rt.tryProvider(ctx, prov, req, mp.ModelID, mp.Provider, apiKeys, w)
+		attemptTimeout := providers.DefaultResponseHeaderTimeout
+		if provCfg.ResponseHeaderTimeoutSeconds > 0 {
+			attemptTimeout = time.Duration(provCfg.ResponseHeaderTimeoutSeconds) * time.Second
+		}
+		in, out, keyFallbacks, err := rt.tryProvider(ctx, prov, req, mp.ModelID, mp.Provider, apiKeys, w, attemptTimeout)
 		fallbacks += keyFallbacks
 		if err == nil {
 			return &FallbackResult{
@@ -399,9 +403,26 @@ func (rt *Router) tryProvider(
 	providerID string,
 	apiKeys []string,
 	w io.Writer,
+	attemptTimeout time.Duration,
 ) (int, int, int, error) {
+	// A provider attempt may rotate through several API keys, but all of those
+	// requests share one pre-stream budget. Otherwise N keys each consume the
+	// full response-header timeout and leave no time for the model fallback.
+	headerTimeoutProvider, hasHeaderTimeout := prov.(providers.ResponseHeaderTimeoutProvider)
+	attemptDeadline := time.Now().Add(attemptTimeout)
+	stream := func(apiKey string) (int, int, error) {
+		if !hasHeaderTimeout {
+			return prov.Stream(ctx, req, modelID, apiKey, w)
+		}
+		remaining := time.Until(attemptDeadline)
+		if remaining <= 0 {
+			return 0, 0, &providers.AttemptTimeoutError{Timeout: attemptTimeout}
+		}
+		return headerTimeoutProvider.StreamWithResponseHeaderTimeout(ctx, req, modelID, apiKey, w, remaining)
+	}
+
 	if len(apiKeys) == 0 {
-		in, out, err := prov.Stream(ctx, req, modelID, "", w)
+		in, out, err := stream("")
 		return in, out, 0, err
 	}
 
@@ -421,7 +442,7 @@ func (rt *Router) tryProvider(
 			continue
 		}
 
-		in, out, err := prov.Stream(ctx, req, modelID, key, w)
+		in, out, err := stream(key)
 		if err == nil {
 			rt.ks.advanceIdx(providerID, idx, n)
 			return in, out, keyFallbacks, nil

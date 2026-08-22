@@ -25,16 +25,16 @@ type OpenAIProvider struct {
 	responseHeaderTimeout time.Duration
 }
 
-// defaultResponseHeaderTimeout leaves time for a fallback before clients such
+// DefaultResponseHeaderTimeout leaves time for a fallback before clients such
 // as Claude Code give up on a request. It limits only time to the first
 // response headers; an established SSE stream is not subject to this limit.
-const defaultResponseHeaderTimeout = 20 * time.Second
+const DefaultResponseHeaderTimeout = 20 * time.Second
 
 // NewOpenAIProvider constructs an OpenAIProvider pointing at baseURL.
 // responseHeaderTimeout is optional for backwards compatibility. A zero value
 // uses the default; it is deliberately not an http.Client total timeout.
 func NewOpenAIProvider(baseURL string, responseHeaderTimeout ...time.Duration) *OpenAIProvider {
-	timeout := defaultResponseHeaderTimeout
+	timeout := DefaultResponseHeaderTimeout
 	if len(responseHeaderTimeout) > 0 && responseHeaderTimeout[0] > 0 {
 		timeout = responseHeaderTimeout[0]
 	}
@@ -439,6 +439,23 @@ func partialTagOverlap(s, tag string) int {
 // On a 400 context-length error it returns *ContextExceededError so the
 // router can synthesise a compact signal instead of retrying other keys.
 func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, modelID, apiKey string, w io.Writer) (int, int, error) {
+	return p.stream(ctx, req, modelID, apiKey, w, p.client, p.responseHeaderTimeout)
+}
+
+// StreamWithResponseHeaderTimeout is used by the router while rotating keys.
+// It limits only the wait for response headers; it never adds a deadline to a
+// stream that has already begun.
+func (p *OpenAIProvider) StreamWithResponseHeaderTimeout(ctx context.Context, req AnthropicRequest, modelID, apiKey string, w io.Writer, timeout time.Duration) (int, int, error) {
+	if timeout <= 0 {
+		return 0, 0, &AttemptTimeoutError{Timeout: timeout}
+	}
+	transport := p.client.Transport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = timeout
+	client := &http.Client{Transport: transport}
+	return p.stream(ctx, req, modelID, apiKey, w, client, timeout)
+}
+
+func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, modelID, apiKey string, w io.Writer, client *http.Client, responseHeaderTimeout time.Duration) (int, int, error) {
 	oaiReq := convertToOpenAI(req, modelID)
 
 	body, err := json.Marshal(oaiReq)
@@ -456,7 +473,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 	}
 	httpReq.Header.Set("Accept", "application/json")
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		// The request context represents the client connection. Do not turn a
 		// caller cancellation/deadline into a retryable provider timeout.
@@ -465,7 +482,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 		}
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return 0, 0, &AttemptTimeoutError{Timeout: p.responseHeaderTimeout}
+			return 0, 0, &AttemptTimeoutError{Timeout: responseHeaderTimeout}
 		}
 		return 0, 0, fmt.Errorf("openai: do request: %w", err)
 	}

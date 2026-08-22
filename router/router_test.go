@@ -2,7 +2,9 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +15,24 @@ import (
 	"github.com/bobbyo/ccr/config"
 	"github.com/bobbyo/ccr/db"
 	"github.com/bobbyo/ccr/middleware"
+	"github.com/bobbyo/ccr/providers"
 )
+
+type blockingProvider struct {
+	calls int
+}
+
+func (p *blockingProvider) Stream(ctx context.Context, _ providers.AnthropicRequest, _ string, _ string, _ io.Writer) (int, int, error) {
+	p.calls++
+	<-ctx.Done()
+	return 0, 0, ctx.Err()
+}
+
+func (p *blockingProvider) StreamWithResponseHeaderTimeout(_ context.Context, _ providers.AnthropicRequest, _ string, _ string, _ io.Writer, timeout time.Duration) (int, int, error) {
+	p.calls++
+	time.Sleep(timeout)
+	return 0, 0, &providers.AttemptTimeoutError{Timeout: timeout}
+}
 
 // writeConfigFile writes config TOML content to a temp file and returns the path.
 func writeConfigFile(t *testing.T, content string) string {
@@ -40,6 +59,26 @@ func anthropicSSEResponse() string {
 func withClientKey(r *http.Request, key *db.ClientKey) *http.Request {
 	ctx := context.WithValue(r.Context(), middleware.ClientKeyContextKey, key)
 	return r.WithContext(ctx)
+}
+
+func TestTryProvider_TimeoutBudgetCoversKeyRotation(t *testing.T) {
+	rt := &Router{ks: newKeyState()}
+	p := &blockingProvider{}
+	start := time.Now()
+	_, _, _, err := rt.tryProvider(
+		context.Background(), p, providers.AnthropicRequest{}, "model", "provider",
+		[]string{"key-one", "key-two", "key-three"}, io.Discard, 25*time.Millisecond,
+	)
+
+	if !errors.Is(err, providers.ErrAttemptTimeout) {
+		t.Fatalf("expected ErrAttemptTimeout, got %v", err)
+	}
+	if p.calls != 1 {
+		t.Fatalf("calls = %d, want 1; timed-out key rotation must not restart the full budget", p.calls)
+	}
+	if elapsed := time.Since(start); elapsed > 80*time.Millisecond {
+		t.Fatalf("attempt took %s, want one shared timeout budget", elapsed)
+	}
 }
 
 func TestRouter_HandleMessages_Success(t *testing.T) {

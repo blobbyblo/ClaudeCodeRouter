@@ -135,9 +135,10 @@ Key ideas:
 
 - **Providers** define how to talk to a backend (`anthropic` or `openai` convention).
 - OpenAI-compatible providers may set `response_header_timeout_seconds` to tune
-  the per-attempt wait for response headers. The default is 20 seconds, which
-  leaves room for the router to use its fallback chain; caller cancellation is
-  still respected and streaming continues without this timeout after headers.
+  the total pre-stream budget for one provider attempt, including API-key
+  rotation. The default is 20 seconds, which leaves room for the router to use
+  its fallback chain; caller cancellation is still respected and streaming
+  continues without this timeout after headers.
 - **Models** are aliases you send from your client (e.g., `opus`). Each alias maps to one or more real model IDs on one or more providers, plus an optional `fallback_to` chain.
 - **Provider keys** are stored in the database (not the config file) and managed through the admin UI.
 

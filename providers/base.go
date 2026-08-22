@@ -91,15 +91,15 @@ func parseRetryAfter(h string) time.Duration {
 }
 
 type ContentBlock struct {
-    Type string `json:"type"`
-    Text string `json:"text,omitempty"`
-    // tool_use fields
-    ID        string          `json:"id,omitempty"`
-    Name      string          `json:"name,omitempty"`
-    InputJSON json.RawMessage `json:"input,omitempty"`
-    // tool_result fields
-    ToolUseID string          `json:"tool_use_id,omitempty"`
-    Content   []ContentBlock  `json:"content,omitempty"` // ← add this
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// tool_use fields
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	InputJSON json.RawMessage `json:"input,omitempty"`
+	// tool_result fields
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Content   []ContentBlock `json:"content,omitempty"` // ← add this
 }
 
 // AnthropicRequest is our internal normalized request format (Anthropic Messages API shape)
@@ -213,4 +213,12 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 // error is ErrRateLimit, ErrUpstream, or a generic error.
 type Provider interface {
 	Stream(ctx context.Context, req AnthropicRequest, modelID, apiKey string, w io.Writer) (int, int, error)
+}
+
+// ResponseHeaderTimeoutProvider lets the router give successive key attempts a
+// shrinking response-header budget without imposing a deadline on an already
+// established stream.
+type ResponseHeaderTimeoutProvider interface {
+	Provider
+	StreamWithResponseHeaderTimeout(ctx context.Context, req AnthropicRequest, modelID, apiKey string, w io.Writer, timeout time.Duration) (int, int, error)
 }

@@ -95,7 +95,10 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req AnthropicRequest, mo
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return 0, 0, fmt.Errorf("anthropic: do request: %w", err)
+		if ctx.Err() != nil {
+			return 0, 0, fmt.Errorf("anthropic: do request: %w", ctx.Err())
+		}
+		return 0, 0, fmt.Errorf("anthropic: do request: %w", &ConnectionError{Err: err})
 	}
 	defer resp.Body.Close()
 

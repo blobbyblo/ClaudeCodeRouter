@@ -484,7 +484,7 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			return 0, 0, &AttemptTimeoutError{Timeout: responseHeaderTimeout}
 		}
-		return 0, 0, fmt.Errorf("openai: do request: %w", err)
+		return 0, 0, fmt.Errorf("openai: do request: %w", &ConnectionError{Err: err})
 	}
 	defer resp.Body.Close()
 

@@ -37,6 +37,19 @@ func (e *AttemptTimeoutError) Error() string {
 func (e *AttemptTimeoutError) Is(target error) bool { return target == ErrAttemptTimeout }
 func (e *AttemptTimeoutError) Unwrap() error        { return ErrAttemptTimeout }
 
+// ErrConnection is returned for a transport failure before an upstream HTTP
+// response exists. It is distinct from an HTTP 4xx/5xx response and can be
+// retried through the router's fallback chain.
+var ErrConnection = errors.New("upstream connection failure")
+
+type ConnectionError struct {
+	Err error
+}
+
+func (e *ConnectionError) Error() string        { return e.Err.Error() }
+func (e *ConnectionError) Is(target error) bool { return target == ErrConnection }
+func (e *ConnectionError) Unwrap() error        { return e.Err }
+
 // ErrContextExceeded is returned when the request body is too large for the
 // model's context window (HTTP 400 context-length error).  Unlike rate limits
 // or upstream errors, this is a property of the REQUEST, not the key or

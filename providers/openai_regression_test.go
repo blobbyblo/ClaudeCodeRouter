@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,6 +95,24 @@ func TestOpenAIProvider_CallerDeadlineRemainsDistinct(t *testing.T) {
 	}
 	if errors.Is(err, ErrAttemptTimeout) {
 		t.Fatalf("caller deadline must not be retried as an attempt timeout: %v", err)
+	}
+}
+
+func TestOpenAIProvider_ConnectionFailureIsDistinct(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	var out bytes.Buffer
+	_, _, err = NewOpenAIProvider("http://"+address).Stream(context.Background(), regressionRequest(), "model", "key", &out)
+	if !errors.Is(err, ErrConnection) {
+		t.Fatalf("expected ErrConnection, got %v", err)
+	}
+	if errors.Is(err, ErrAttemptTimeout) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrRateLimit) {
+		t.Fatalf("connection failure must remain distinct: %v", err)
 	}
 }
 

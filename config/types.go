@@ -14,8 +14,9 @@ type ServerConfig struct {
 }
 
 type ProviderConfig struct {
-	BaseURL    string `toml:"base_url"   json:"base_url"`
-	Convention string `toml:"convention" json:"convention"`
+	BaseURL                      string `toml:"base_url"                       json:"base_url"`
+	Convention                   string `toml:"convention"                     json:"convention"`
+	ResponseHeaderTimeoutSeconds int    `toml:"response_header_timeout_seconds" json:"response_header_timeout_seconds"`
 }
 
 type ModelConfig struct {

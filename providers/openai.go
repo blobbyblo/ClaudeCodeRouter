@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -18,22 +20,33 @@ import (
 // OpenAIProvider implements Provider for the OpenAI Chat Completions API,
 // converting to/from the Anthropic SSE format on the fly.
 type OpenAIProvider struct {
-	BaseURL string
-	client  *http.Client
+	BaseURL               string
+	client                *http.Client
+	responseHeaderTimeout time.Duration
 }
 
+// defaultResponseHeaderTimeout leaves time for a fallback before clients such
+// as Claude Code give up on a request. It limits only time to the first
+// response headers; an established SSE stream is not subject to this limit.
+const defaultResponseHeaderTimeout = 20 * time.Second
+
 // NewOpenAIProvider constructs an OpenAIProvider pointing at baseURL.
-func NewOpenAIProvider(baseURL string) *OpenAIProvider {
+// responseHeaderTimeout is optional for backwards compatibility. A zero value
+// uses the default; it is deliberately not an http.Client total timeout.
+func NewOpenAIProvider(baseURL string, responseHeaderTimeout ...time.Duration) *OpenAIProvider {
+	timeout := defaultResponseHeaderTimeout
+	if len(responseHeaderTimeout) > 0 && responseHeaderTimeout[0] > 0 {
+		timeout = responseHeaderTimeout[0]
+	}
 	return &OpenAIProvider{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		// ResponseHeaderTimeout: how long to wait for NIM to start streaming after
-		// the request is sent. Once the first byte arrives the stream runs freely.
-		// Without this, a queued NIM request blocks until the caller's context
-		// deadline fires (~30 s for Claude Code), burning the whole budget before
-		// the fallback chain can try the next key or model.
+		BaseURL:               strings.TrimRight(baseURL, "/"),
+		responseHeaderTimeout: timeout,
+		// This is an attempt-start budget, not a total request timeout. Once the
+		// upstream has sent headers, long-running SSE output remains governed only
+		// by the incoming caller context.
 		client: &http.Client{
 			Transport: &http.Transport{
-				ResponseHeaderTimeout: 30 * time.Second,
+				ResponseHeaderTimeout: timeout,
 			},
 		},
 	}
@@ -75,6 +88,7 @@ type openAIChunk struct {
 			Role             string           `json:"role"`
 			Content          string           `json:"content"`
 			ReasoningContent string           `json:"reasoning_content"` // DeepSeek R1, Kimi K2, Qwen3
+			Reasoning        string           `json:"reasoning"`         // OpenRouter and newer OpenAI-compatible providers
 			ToolCalls        []openAIToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
@@ -364,8 +378,8 @@ func writeAnthropicEvent(w io.Writer, eventType, data string) {
 // thinkFilter routes streaming content to thinking vs text blocks,
 // handling <think>...</think> tags that may be split across chunks.
 type thinkFilter struct {
-	inThink    bool
-	partial    string // suffix of last chunk that might be start of a tag
+	inThink bool
+	partial string // suffix of last chunk that might be start of a tag
 }
 
 // process returns (textContent, thinkContent, remainingPartial).
@@ -444,6 +458,15 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
+		// The request context represents the client connection. Do not turn a
+		// caller cancellation/deadline into a retryable provider timeout.
+		if ctx.Err() != nil {
+			return 0, 0, fmt.Errorf("openai: do request: %w", ctx.Err())
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return 0, 0, &AttemptTimeoutError{Timeout: p.responseHeaderTimeout}
+		}
 		return 0, 0, fmt.Errorf("openai: do request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -474,7 +497,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 
 	// Anthropic stream state
 	streamStarted := false
-	streamEnded := false   // prevents duplicate finish events
+	streamEnded := false // prevents duplicate finish events
 	nextBlockIdx := 0
 	thinkingBlockIdx := -1 // -1=not opened, >=0=open, -2=closed
 	textBlockIdx := -1     // -1=not opened, >=0=open, -2=closed
@@ -531,8 +554,8 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 			textBlockIdx = nextBlockIdx
 			nextBlockIdx++
 			d, _ := json.Marshal(map[string]interface{}{
-				"type":  "content_block_start",
-				"index": textBlockIdx,
+				"type":          "content_block_start",
+				"index":         textBlockIdx,
 				"content_block": map[string]string{"type": "text", "text": ""},
 			})
 			writeAnthropicEvent(w, "content_block_start", string(d))
@@ -608,6 +631,9 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 		// Reasoning content (providers that use a dedicated field).
 		if choice.Delta.ReasoningContent != "" {
 			emitThinkingDelta(choice.Delta.ReasoningContent)
+		}
+		if choice.Delta.Reasoning != "" {
+			emitThinkingDelta(choice.Delta.Reasoning)
 		}
 
 		// Tool calls.
@@ -692,7 +718,6 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req AnthropicRequest, model
 
 	return inputTokens, outputTokens, nil
 }
-
 
 // contextExceededRe matches OpenAI-compatible "context length exceeded" 400 bodies.
 // Example: "...maximum context length of 262144 tokens. You requested ... : 233409 tokens from the input..."

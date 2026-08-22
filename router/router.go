@@ -129,7 +129,7 @@ func (lw *lazyStreamWriter) Write(p []byte) (int, error) {
 // openAIOut=true means convert the Anthropic SSE response to OpenAI SSE format.
 func (rt *Router) proxy(w http.ResponseWriter, r *http.Request, req providers.AnthropicRequest, openAIOut bool) {
 	slog.Info("incoming", "model", req.Model)
-	
+
 	start := time.Now()
 	cfg := rt.cfg.Get()
 
@@ -340,7 +340,7 @@ func (rt *Router) fallbackChain(ctx context.Context, cfg *config.Config, req pro
 			continue
 		}
 
-		prov, err := newProvider(provCfg.Convention, provCfg.BaseURL)
+		prov, err := newProvider(provCfg)
 		if err != nil {
 			slog.Warn("router: cannot create provider", "provider", mp.Provider, "err", err)
 			continue
@@ -352,7 +352,8 @@ func (rt *Router) fallbackChain(ctx context.Context, cfg *config.Config, req pro
 		}
 
 		// Providers only write to w after a confirmed 200 response, so pre-stream
-		// errors (429, 5xx) leave w untouched and we can safely try the next one.
+		// errors (429, 5xx, or attempt-start timeouts) leave w untouched and we
+		// can safely try the next one.
 		in, out, keyFallbacks, err := rt.tryProvider(ctx, prov, req, mp.ModelID, mp.Provider, apiKeys, w)
 		fallbacks += keyFallbacks
 		if err == nil {
@@ -364,7 +365,7 @@ func (rt *Router) fallbackChain(ctx context.Context, cfg *config.Config, req pro
 				FallbackCount: fallbacks,
 			}, nil
 		}
-		if errors.Is(err, providers.ErrRateLimit) || errors.Is(err, providers.ErrUpstream) {
+		if errors.Is(err, providers.ErrRateLimit) || errors.Is(err, providers.ErrUpstream) || errors.Is(err, providers.ErrAttemptTimeout) {
 			slog.Warn("router: provider failed, trying next", "provider", mp.Provider, "err", err)
 			fallbacks++ // this whole provider was exhausted — one provider-level fallback
 			continue
@@ -437,8 +438,8 @@ func (rt *Router) tryProvider(
 			lastErr = err
 			continue
 		}
-		if errors.Is(err, providers.ErrUpstream) {
-			slog.Warn("router: key got upstream error, trying next key", "provider", providerID, "key_index", idx, "err", err)
+		if errors.Is(err, providers.ErrUpstream) || errors.Is(err, providers.ErrAttemptTimeout) {
+			slog.Warn("router: provider attempt failed, trying next key", "provider", providerID, "key_index", idx, "err", err)
 			keyFallbacks++
 			lastErr = err
 			continue // try next key before giving up on this provider
@@ -457,14 +458,18 @@ func (rt *Router) publishEvent(ev middleware.LogEvent) {
 	}
 }
 
-func newProvider(convention, baseURL string) (providers.Provider, error) {
-	switch convention {
+func newProvider(cfg config.ProviderConfig) (providers.Provider, error) {
+	switch cfg.Convention {
 	case "anthropic":
-		return providers.NewAnthropicProvider(baseURL), nil
+		return providers.NewAnthropicProvider(cfg.BaseURL), nil
 	case "openai":
-		return providers.NewOpenAIProvider(baseURL), nil
+		var timeout time.Duration
+		if cfg.ResponseHeaderTimeoutSeconds > 0 {
+			timeout = time.Duration(cfg.ResponseHeaderTimeoutSeconds) * time.Second
+		}
+		return providers.NewOpenAIProvider(cfg.BaseURL, timeout), nil
 	default:
-		return nil, fmt.Errorf("unknown convention: %s", convention)
+		return nil, fmt.Errorf("unknown convention: %s", cfg.Convention)
 	}
 }
 

@@ -19,6 +19,24 @@ var ErrUpstream = errors.New("upstream error (5xx)")
 // that the cooldown duration from the Retry-After header is also available.
 var ErrRateLimit = errors.New("rate limited (429)")
 
+// ErrAttemptTimeout is returned when an upstream has not sent response headers
+// before this provider attempt's configured budget. It is retryable: no stream
+// bytes have been written, so the router can safely try another key, provider,
+// or model.
+var ErrAttemptTimeout = errors.New("provider attempt timed out waiting for response headers")
+
+// AttemptTimeoutError retains the timeout duration while allowing callers to
+// distinguish a retryable provider-start timeout from caller cancellation.
+type AttemptTimeoutError struct {
+	Timeout time.Duration
+}
+
+func (e *AttemptTimeoutError) Error() string {
+	return fmt.Sprintf("%s after %s", ErrAttemptTimeout, e.Timeout)
+}
+func (e *AttemptTimeoutError) Is(target error) bool { return target == ErrAttemptTimeout }
+func (e *AttemptTimeoutError) Unwrap() error        { return ErrAttemptTimeout }
+
 // ErrContextExceeded is returned when the request body is too large for the
 // model's context window (HTTP 400 context-length error).  Unlike rate limits
 // or upstream errors, this is a property of the REQUEST, not the key or

@@ -42,6 +42,7 @@ api_keys   = ["ANTHROPIC_API_KEY"]
 [providers.openai]
 base_url   = "https://api.openai.com"
 convention = "openai"
+response_header_timeout_seconds = 17
 api_keys   = ["OPENAI_API_KEY"]
 
 [[models]]
@@ -99,6 +100,9 @@ alias = "smart"
 	}
 	if ant.Convention != "anthropic" {
 		t.Errorf("anthropic Convention: got %q, want \"anthropic\"", ant.Convention)
+	}
+	if got := cfg.Providers["openai"].ResponseHeaderTimeoutSeconds; got != 17 {
+		t.Errorf("openai ResponseHeaderTimeoutSeconds: got %d, want 17", got)
 	}
 	// APIKeys are now stored in the database, not in the config struct.
 

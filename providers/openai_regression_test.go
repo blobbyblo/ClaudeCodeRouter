@@ -3,6 +3,7 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,6 +114,34 @@ func TestOpenAIProvider_ConnectionFailureIsDistinct(t *testing.T) {
 	}
 	if errors.Is(err, ErrAttemptTimeout) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrRateLimit) {
 		t.Fatalf("connection failure must remain distinct: %v", err)
+	}
+}
+
+func TestOpenAIProvider_KeyRotationTransportUsesHTTP2(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("HTTP version = %s, want HTTP/2", r.Proto)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"id":"h2","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`+"\n\n"+"data: [DONE]\n\n")
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	p := NewOpenAIProvider(srv.URL)
+	p.client = &http.Client{Transport: &http.Transport{
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true}, // httptest certificate
+		ForceAttemptHTTP2:     true,
+		ResponseHeaderTimeout: time.Second,
+	}}
+	var out bytes.Buffer
+	_, _, err := p.StreamWithResponseHeaderTimeout(context.Background(), regressionRequest(), "model", "key", &out, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "ok") {
+		t.Fatalf("missing streamed response: %s", out.String())
 	}
 }
 

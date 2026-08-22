@@ -47,6 +47,10 @@ func NewOpenAIProvider(baseURL string, responseHeaderTimeout ...time.Duration) *
 		client: &http.Client{
 			Transport: &http.Transport{
 				ResponseHeaderTimeout: timeout,
+				// The router uses a custom transport to enforce the header budget.
+				// Opt in explicitly so cloned per-key transports keep HTTP/2 support
+				// for providers such as Nvidia NIM and OpenRouter.
+				ForceAttemptHTTP2: true,
 			},
 		},
 	}

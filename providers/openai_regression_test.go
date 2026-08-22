@@ -134,6 +134,37 @@ func TestOpenAIProvider_GoneModelIsFallbackEligible(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_SynthesizesMessageStopWhenDoneSentinelIsMissing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"id":"no-done","choices":[{"index":0,"delta":{"content":"complete"},"finish_reason":"stop"}]}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	_, _, err := NewOpenAIProvider(srv.URL).Stream(context.Background(), regressionRequest(), "model", "key", &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "event: message_stop") {
+		t.Fatalf("missing synthesized message_stop: %s", out.String())
+	}
+}
+
+func TestOpenAIProvider_RejectsTruncatedStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"id":"truncated","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	_, _, err := NewOpenAIProvider(srv.URL).Stream(context.Background(), regressionRequest(), "model", "key", &out)
+	if err == nil || !strings.Contains(err.Error(), "stream ended before") {
+		t.Fatalf("expected truncated-stream error, got %v", err)
+	}
+}
+
 func TestOpenAIProvider_KeyRotationTransportUsesHTTP2(t *testing.T) {
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 {

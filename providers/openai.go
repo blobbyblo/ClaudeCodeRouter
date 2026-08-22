@@ -523,6 +523,7 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 	// Anthropic stream state
 	streamStarted := false
 	streamEnded := false // prevents duplicate finish events
+	messageStopSent := false
 	nextBlockIdx := 0
 	thinkingBlockIdx := -1 // -1=not opened, >=0=open, -2=closed
 	textBlockIdx := -1     // -1=not opened, >=0=open, -2=closed
@@ -614,7 +615,10 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		if data == "[DONE]" {
-			writeAnthropicEvent(w, "message_stop", `{"type":"message_stop"}`)
+			if !messageStopSent {
+				writeAnthropicEvent(w, "message_stop", `{"type":"message_stop"}`)
+				messageStopSent = true
+			}
 			break
 		}
 
@@ -739,6 +743,16 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 
 	if err := scanner.Err(); err != nil {
 		return inputTokens, outputTokens, fmt.Errorf("openai: read stream: %w", err)
+	}
+	// Some compatible providers close the connection immediately after their
+	// finish_reason chunk and omit the OpenAI [DONE] sentinel. The Anthropic
+	// client still requires message_stop, so complete that valid stream here.
+	if streamEnded && !messageStopSent {
+		writeAnthropicEvent(w, "message_stop", `{"type":"message_stop"}`)
+		return inputTokens, outputTokens, nil
+	}
+	if streamStarted && !messageStopSent {
+		return inputTokens, outputTokens, fmt.Errorf("openai: stream ended before finish_reason or [DONE]")
 	}
 
 	return inputTokens, outputTokens, nil

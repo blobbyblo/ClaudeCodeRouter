@@ -524,6 +524,10 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 	streamStarted := false
 	streamEnded := false // prevents duplicate finish events
 	messageStopSent := false
+	doneReceived := false
+	chunkCount := 0
+	toolCallChunkCount := 0
+	finishReason := ""
 	nextBlockIdx := 0
 	thinkingBlockIdx := -1 // -1=not opened, >=0=open, -2=closed
 	textBlockIdx := -1     // -1=not opened, >=0=open, -2=closed
@@ -615,6 +619,7 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		if data == "[DONE]" {
+			doneReceived = true
 			if !messageStopSent {
 				writeAnthropicEvent(w, "message_stop", `{"type":"message_stop"}`)
 				messageStopSent = true
@@ -626,6 +631,7 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
+		chunkCount++
 
 		if chunk.Usage != nil {
 			inputTokens = chunk.Usage.PromptTokens
@@ -667,6 +673,7 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 
 		// Tool calls.
 		for _, tc := range choice.Delta.ToolCalls {
+			toolCallChunkCount++
 			// Grow slot slice to accommodate this tool_call index.
 			for len(toolCallSlots) <= tc.Index {
 				toolCallSlots = append(toolCallSlots, tcInfo{blockIdx: -1})
@@ -706,6 +713,7 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 		// Finish (guard against duplicate finish_reason chunks).
 		if choice.FinishReason != nil && !streamEnded {
 			streamEnded = true
+			finishReason = *choice.FinishReason
 
 			// Flush any partial tag as text.
 			if filter.partial != "" {
@@ -749,10 +757,14 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 	// client still requires message_stop, so complete that valid stream here.
 	if streamEnded && !messageStopSent {
 		writeAnthropicEvent(w, "message_stop", `{"type":"message_stop"}`)
+		slog.Info("openai: stream completed without done sentinel", "model", modelID, "chunks", chunkCount, "tool_call_chunks", toolCallChunkCount, "finish_reason", finishReason)
 		return inputTokens, outputTokens, nil
 	}
 	if streamStarted && !messageStopSent {
 		return inputTokens, outputTokens, fmt.Errorf("openai: stream ended before finish_reason or [DONE]")
+	}
+	if streamStarted {
+		slog.Info("openai: stream completed", "model", modelID, "chunks", chunkCount, "tool_call_chunks", toolCallChunkCount, "finish_reason", finishReason, "done_received", doneReceived)
 	}
 
 	return inputTokens, outputTokens, nil

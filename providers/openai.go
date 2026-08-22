@@ -500,6 +500,10 @@ func (p *OpenAIProvider) stream(ctx context.Context, req AnthropicRequest, model
 		slog.Error("openai: upstream 5xx", "status", resp.StatusCode, "body", string(b))
 		return 0, 0, ErrUpstream
 	}
+	if resp.StatusCode == http.StatusGone {
+		b, _ := io.ReadAll(resp.Body)
+		return 0, 0, &ModelUnavailableError{Status: resp.StatusCode, Body: string(b)}
+	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		// Detect context-length 400 before returning a generic error.

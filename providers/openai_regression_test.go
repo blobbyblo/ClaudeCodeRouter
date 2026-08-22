@@ -117,6 +117,23 @@ func TestOpenAIProvider_ConnectionFailureIsDistinct(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_GoneModelIsFallbackEligible(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+		fmt.Fprint(w, `{"detail":"model retired"}`)
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	_, _, err := NewOpenAIProvider(srv.URL).Stream(context.Background(), regressionRequest(), "retired-model", "key", &out)
+	if !errors.Is(err, ErrModelUnavailable) {
+		t.Fatalf("expected ErrModelUnavailable, got %v", err)
+	}
+	if errors.Is(err, ErrUpstream) || errors.Is(err, ErrAttemptTimeout) || errors.Is(err, ErrConnection) {
+		t.Fatalf("retired model error must remain distinct: %v", err)
+	}
+}
+
 func TestOpenAIProvider_KeyRotationTransportUsesHTTP2(t *testing.T) {
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 {

@@ -50,6 +50,22 @@ func (e *ConnectionError) Error() string        { return e.Err.Error() }
 func (e *ConnectionError) Is(target error) bool { return target == ErrConnection }
 func (e *ConnectionError) Unwrap() error        { return e.Err }
 
+// ErrModelUnavailable is returned when an upstream explicitly says that the
+// configured model is gone. It is safe to fall back to the next configured
+// provider or model alias, unlike an ordinary client-side 4xx request error.
+var ErrModelUnavailable = errors.New("configured model unavailable")
+
+type ModelUnavailableError struct {
+	Status int
+	Body   string
+}
+
+func (e *ModelUnavailableError) Error() string {
+	return fmt.Sprintf("configured model unavailable (HTTP %d): %s", e.Status, e.Body)
+}
+func (e *ModelUnavailableError) Is(target error) bool { return target == ErrModelUnavailable }
+func (e *ModelUnavailableError) Unwrap() error        { return ErrModelUnavailable }
+
 // ErrContextExceeded is returned when the request body is too large for the
 // model's context window (HTTP 400 context-length error).  Unlike rate limits
 // or upstream errors, this is a property of the REQUEST, not the key or

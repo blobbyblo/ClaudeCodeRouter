@@ -369,7 +369,7 @@ func (rt *Router) fallbackChain(ctx context.Context, cfg *config.Config, req pro
 				FallbackCount: fallbacks,
 			}, nil
 		}
-		if errors.Is(err, providers.ErrRateLimit) || errors.Is(err, providers.ErrUpstream) || errors.Is(err, providers.ErrAttemptTimeout) || errors.Is(err, providers.ErrConnection) {
+		if errors.Is(err, providers.ErrRateLimit) || errors.Is(err, providers.ErrUpstream) || errors.Is(err, providers.ErrAttemptTimeout) || errors.Is(err, providers.ErrConnection) || errors.Is(err, providers.ErrModelUnavailable) {
 			slog.Warn("router: provider failed, trying next", "provider", mp.Provider, "err", err)
 			fallbacks++ // this whole provider was exhausted — one provider-level fallback
 			continue
@@ -459,7 +459,7 @@ func (rt *Router) tryProvider(
 			lastErr = err
 			continue
 		}
-		if errors.Is(err, providers.ErrUpstream) || errors.Is(err, providers.ErrAttemptTimeout) || errors.Is(err, providers.ErrConnection) {
+		if errors.Is(err, providers.ErrUpstream) || errors.Is(err, providers.ErrAttemptTimeout) || errors.Is(err, providers.ErrConnection) || errors.Is(err, providers.ErrModelUnavailable) {
 			slog.Warn("router: provider attempt failed, trying next key", "provider", providerID, "key_index", idx, "err", err)
 			keyFallbacks++
 			lastErr = err
